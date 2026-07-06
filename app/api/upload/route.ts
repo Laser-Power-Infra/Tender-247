@@ -62,7 +62,8 @@ function buildCreateData(
   row: Record<string, unknown>,
   headers: string[],
   fileId: number,
-  knownFieldSet: Set<string>
+  knownFieldSet: Set<string>,
+  excludedCategory: string | null
 ): { refNo: string; createData: Record<string, unknown> } {
   const refNo = getReferenceNo(row, headers) || "";
   const { knownFields, extraFields } = mapRowToTender(row, knownFieldSet);
@@ -70,6 +71,7 @@ function buildCreateData(
   const createData: Record<string, unknown> = {
     fileId,
     referenceNo: refNo,
+    excludedCategory,
   };
 
   for (const [key, value] of Object.entries(knownFields)) {
@@ -90,7 +92,8 @@ function buildCreateData(
 function parseSheetData(
   workbook: XLSX.WorkBook,
   sheetName: string,
-  keywords: string[],
+  cableKeywords: string[],
+  conductorsKeywords: string[],
   today: Date
 ): ParsedSheet {
   const sheet = workbook.Sheets[sheetName];
@@ -119,26 +122,37 @@ function parseSheetData(
     const tenderBrief = getFieldValue(row, headers, "tenderBrief");
     const briefText =
       tenderBrief == null ? "" : String(tenderBrief).toLowerCase();
-    const isKeywordExcluded =
+
+    const excludedCategories: string[] = [];
+
+    const matchesCable =
       briefText.length > 0 &&
-      keywords.some((kw) => briefText.includes(kw));
+      cableKeywords.some((kw) => briefText.includes(kw));
+    if (matchesCable) excludedCategories.push("cable");
+
+    const matchesConductors =
+      briefText.length > 0 &&
+      conductorsKeywords.some((kw) => briefText.includes(kw));
+    if (matchesConductors) excludedCategories.push("conductors");
 
     const deadlineRaw = getFieldValue(row, headers, "deadline");
     const deadlineDate = deadlineRaw ? parseDate(deadlineRaw) : null;
     const isDateExcluded =
       deadlineDate !== null && deadlineDate.getTime() <= today.getTime();
+    if (isDateExcluded) excludedCategories.push("date");
 
-    if (isKeywordExcluded || isDateExcluded) {
-      excludedCount++;
-      continue;
-    }
+    const excludedCategory =
+      excludedCategories.length > 0 ? excludedCategories.join(",") : null;
+
+    if (excludedCategory !== null) excludedCount++;
 
     if (isGemReference(refNo)) {
       const { refNo: r, createData } = buildCreateData(
         row,
         headers,
         0,
-        GEM_FIELDS
+        GEM_FIELDS,
+        excludedCategory
       );
       gemPrepared.push({ refNo: r, createData });
     } else {
@@ -146,7 +160,8 @@ function parseSheetData(
         row,
         headers,
         0,
-        NON_GEM_FIELDS
+        NON_GEM_FIELDS,
+        excludedCategory
       );
       nonGemPrepared.push({ refNo: r, createData });
     }
@@ -168,27 +183,59 @@ async function insertGemPrepared(
 ): Promise<void> {
   if (!prepared.length) return;
 
-  const batches = chunk(prepared, INSERT_BATCH_SIZE);
+  const refNos = prepared.map(p => p.refNo);
+
+  const existingRecords = await prisma.gemTender.findMany({
+    where: { referenceNo: { in: refNos } },
+    include: { extraFields: true },
+  });
+
+  if (existingRecords.length > 0) {
+    await prisma.gemTender.deleteMany({
+      where: { referenceNo: { in: existingRecords.map(r => r.referenceNo) } },
+    });
+  }
+
+  const createDataList = prepared.map(p => {
+    const existing = existingRecords.find(r => r.referenceNo === p.refNo);
+
+    if (existing) {
+      const { id, fileId: _oldFileId, createdAt, updatedAt, referenceNo, extraFields, ...oldData } = existing;
+      const newDeadline = p.createData.deadline as Date | undefined;
+      const newExcludedCategory = p.createData.excludedCategory as string | null;
+
+      return {
+        ...oldData,
+        referenceNo,
+        deadline: newDeadline ?? oldData.deadline,
+        excludedCategory: newExcludedCategory,
+        fileId,
+        extraFields: extraFields.length > 0
+          ? { create: extraFields.map(ef => ({ fieldName: ef.fieldName, fieldValue: ef.fieldValue })) }
+          : undefined,
+      };
+    }
+
+    return { ...p.createData, fileId };
+  });
+
+  const batches = chunk(createDataList, INSERT_BATCH_SIZE);
 
   for (const batch of batches) {
     try {
       await prisma.$transaction(
-        batch.map((r) => {
-          const data = { ...r.createData, fileId };
-          return prisma.gemTender.create({ data: data as any });
-        }),
+        batch.map((data) => prisma.gemTender.create({ data: data as any })),
         { timeout: TX_TIMEOUT }
       );
       sheetResult.gemCount += batch.length;
     } catch {
-      for (const row of batch) {
+      for (const data of batch) {
         try {
-          const data = { ...row.createData, fileId };
           await prisma.gemTender.create({ data: data as any });
           sheetResult.gemCount++;
         } catch (err) {
           sheetResult.errors.push(
-            `Gem row ${row.refNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`
+            `Gem row ${(data as any).referenceNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`
           );
         }
       }
@@ -203,27 +250,59 @@ async function insertNonGemPrepared(
 ): Promise<void> {
   if (!prepared.length) return;
 
-  const batches = chunk(prepared, INSERT_BATCH_SIZE);
+  const refNos = prepared.map(p => p.refNo);
+
+  const existingRecords = await prisma.nonGemTender.findMany({
+    where: { referenceNo: { in: refNos } },
+    include: { extraFields: true },
+  });
+
+  if (existingRecords.length > 0) {
+    await prisma.nonGemTender.deleteMany({
+      where: { referenceNo: { in: existingRecords.map(r => r.referenceNo) } },
+    });
+  }
+
+  const createDataList = prepared.map(p => {
+    const existing = existingRecords.find(r => r.referenceNo === p.refNo);
+
+    if (existing) {
+      const { id, fileId: _oldFileId, createdAt, updatedAt, referenceNo, extraFields, ...oldData } = existing;
+      const newDeadline = p.createData.deadline as Date | undefined;
+      const newExcludedCategory = p.createData.excludedCategory as string | null;
+
+      return {
+        ...oldData,
+        referenceNo,
+        deadline: newDeadline ?? oldData.deadline,
+        excludedCategory: newExcludedCategory,
+        fileId,
+        extraFields: extraFields.length > 0
+          ? { create: extraFields.map(ef => ({ fieldName: ef.fieldName, fieldValue: ef.fieldValue })) }
+          : undefined,
+      };
+    }
+
+    return { ...p.createData, fileId };
+  });
+
+  const batches = chunk(createDataList, INSERT_BATCH_SIZE);
 
   for (const batch of batches) {
     try {
       await prisma.$transaction(
-        batch.map((r) => {
-          const data = { ...r.createData, fileId };
-          return prisma.nonGemTender.create({ data: data as any });
-        }),
+        batch.map((data) => prisma.nonGemTender.create({ data: data as any })),
         { timeout: TX_TIMEOUT }
       );
       sheetResult.nonGemCount += batch.length;
     } catch {
-      for (const row of batch) {
+      for (const data of batch) {
         try {
-          const data = { ...row.createData, fileId };
           await prisma.nonGemTender.create({ data: data as any });
           sheetResult.nonGemCount++;
         } catch (err) {
           sheetResult.errors.push(
-            `Non-gem row ${row.refNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`
+            `Non-gem row ${(data as any).referenceNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`
           );
         }
       }
@@ -279,16 +358,24 @@ async function processFile(file: File): Promise<FileResult> {
   const buffer = Buffer.from(arrayBuffer);
 
   const keywordRows = await prisma.exlusionKeywords.findMany();
-  const keywords = [
-    ...new Set(
-      keywordRows.flatMap((r) =>
-        (r.keywords || "")
+
+  const cableRow = keywordRows.find((r) => r.category === "cable");
+  const conductorsRow = keywordRows.find((r) => r.category === "conductors");
+
+  function parseKeywordRow(row: (typeof cableRow)): string[] {
+    if (!row || !row.keywords) return [];
+    return [
+      ...new Set(
+        row.keywords
           .split(",")
           .map((k) => k.trim().toLowerCase())
           .filter(Boolean)
-      )
-    ),
-  ];
+      ),
+    ];
+  }
+
+  const cableKeywords = parseKeywordRow(cableRow);
+  const conductorsKeywords = parseKeywordRow(conductorsRow);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -311,7 +398,7 @@ async function processFile(file: File): Promise<FileResult> {
 
   const sheetTasks = workbook.SheetNames.map((sheetName) =>
     limit(async () => {
-      const parsed = parseSheetData(workbook, sheetName, keywords, today);
+      const parsed = parseSheetData(workbook, sheetName, cableKeywords, conductorsKeywords, today);
 
       const sheetResult: SheetResult = {
         sheetName: parsed.sheetName,
@@ -342,7 +429,7 @@ async function processFile(file: File): Promise<FileResult> {
     fileResult.excludedCount += s.excludedCount;
     fileResult.totalErrors.push(...s.errors);
   }
-  fileResult.totalCount = fileResult.totalGem + fileResult.totalNonGem + fileResult.excludedCount;
+  fileResult.totalCount = fileResult.totalGem + fileResult.totalNonGem;
 
   await prisma.file.update({
     where: { id: fileRecord.id },

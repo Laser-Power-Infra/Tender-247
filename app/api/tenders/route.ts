@@ -37,6 +37,7 @@ const ALL_KNOWN_FIELDS = [
     ...NON_GEM_DISPLAY_FIELDS,
     "aiRelevanceValid",
     "aiRelevanceReason",
+    "excludedCategory",
   ]),
 ];
 

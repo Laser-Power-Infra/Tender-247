@@ -99,6 +99,8 @@ model GemTender {
 
   checklist String?
 
+  excludedCategory String?
+
   aiRelevanceValid   Boolean?
   aiRelevanceReason  String?
 
@@ -135,6 +137,8 @@ model NonGemTender {
   quantity String?
 
   checklist String?
+
+  excludedCategory String?
 
   aiRelevanceValid   Boolean?
   aiRelevanceReason  String?
