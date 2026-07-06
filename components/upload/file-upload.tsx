@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { useAppDispatch, useAppSelector } from "@/lib/hooks";
+import {
+  addFiles,
+  removeFile,
+  uploadFiles,
+  clearResults,
+} from "@/lib/slices/uploadSlice";
 
 interface SheetResult {
   sheetName: string;
@@ -33,12 +39,6 @@ interface FileResult {
   totalErrors: string[];
   totalCount: number;
   excludedCount: number;
-}
-
-interface UploadResponse {
-  success: boolean;
-  results: FileResult[];
-  error?: string;
 }
 
 function UploadIcon() {
@@ -73,35 +73,11 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function FileUpload() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [parsing, setParsing] = useState(false);
-  const [results, setResults] = useState<FileResult[] | null>(null);
+  const dispatch = useAppDispatch();
+  const pendingFiles = useAppSelector((s) => s.upload.pendingFiles);
+  const parsing = useAppSelector((s) => s.upload.parsing);
+  const results = useAppSelector((s) => s.upload.results);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const addFiles = useCallback((newFiles: FileList | File[]) => {
-    const validFiles = Array.from(newFiles).filter(
-      (f) =>
-        f.name.endsWith(".xlsx") ||
-        f.name.endsWith(".xls") ||
-        f.type.includes("spreadsheet") ||
-        f.type.includes("excel")
-    );
-
-    const invalidCount = Array.from(newFiles).length - validFiles.length;
-    if (invalidCount > 0) {
-      toast.error(`${invalidCount} file(s) skipped — only .xlsx/.xls allowed`);
-    }
-
-    setFiles((prev) => {
-      const existing = new Set(prev.map((f) => f.name + f.size));
-      const unique = validFiles.filter((f) => !existing.has(f.name + f.size));
-      return [...prev, ...unique];
-    });
-  }, []);
-
-  const removeFile = useCallback((index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-  }, []);
 
   const handleUploadClick = useCallback(() => {
     inputRef.current?.click();
@@ -110,64 +86,17 @@ export default function FileUpload() {
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files?.length) {
-        addFiles(e.target.files);
+        dispatch(addFiles(e.target.files));
         e.target.value = "";
       }
     },
-    [addFiles]
+    [dispatch],
   );
 
   const handleParse = useCallback(async () => {
-    if (!files.length) return;
-
-    setParsing(true);
-    setResults(null);
-    const accumulated: FileResult[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const label = `Processing file ${i + 1}/${files.length}: ${file.name}`;
-
-      const loadingToast = toast.loading(label);
-
-      try {
-        const formData = new FormData();
-        formData.append("files", file);
-
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data: UploadResponse = await res.json();
-
-        if (!res.ok) {
-          toast.dismiss(loadingToast);
-          toast.error(`${file.name} failed`, {
-            description: data.error || "Upload error",
-          });
-          continue;
-        }
-
-        const fileResult = data.results[0];
-        accumulated.push(fileResult);
-
-        toast.dismiss(loadingToast);
-        toast.success(`${file.name} done`, {
-          description: `${fileResult.totalGem} GEM · ${fileResult.totalNonGem} Non-GEM · ${fileResult.excludedCount} excluded${fileResult.totalErrors.length ? ` · ${fileResult.totalErrors.length} error(s)` : ""}`,
-        });
-      } catch {
-        toast.dismiss(loadingToast);
-        toast.error(`${file.name} failed`, {
-          description: "Network error. Please try again.",
-        });
-      }
-    }
-
-    setResults(accumulated);
-    setFiles([]);
-    setParsing(false);
-  }, [files]);
+    if (!pendingFiles.length) return;
+    dispatch(uploadFiles(pendingFiles));
+  }, [dispatch, pendingFiles]);
 
   const totalRows = results
     ? results.reduce((s, r) => s + r.totalGem + r.totalNonGem, 0)
@@ -179,7 +108,6 @@ export default function FileUpload() {
   return (
     <div className="h-full flex flex-col space-y-4">
       <div className="flex-1 flex flex-col rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
-        {/* Deep blue header */}
         <div className="bg-gradient-to-r from-[#0a1e3d] to-[#13305f] px-5 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-white/10">
@@ -215,9 +143,8 @@ export default function FileUpload() {
           onChange={handleInputChange}
         />
 
-        {/* Body */}
         <div className="flex-1 flex flex-col p-5">
-          {files.length === 0 && !results && (
+          {pendingFiles.length === 0 && !results && (
             <div
               className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-lg p-6 cursor-pointer hover:border-blue-300 hover:bg-blue-50/20 transition-all"
               onClick={handleUploadClick}
@@ -236,11 +163,10 @@ export default function FileUpload() {
             </div>
           )}
 
-          {/* File pills */}
-          {files.length > 0 && (
+          {pendingFiles.length > 0 && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                {files.map((file, i) => (
+                {pendingFiles.map((file, i) => (
                   <Badge
                     key={file.name + file.size}
                     variant="secondary"
@@ -252,7 +178,7 @@ export default function FileUpload() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => removeFile(i)}
+                      onClick={() => dispatch(removeFile(i))}
                       className="flex shrink-0 items-center justify-center rounded-md p-0.5 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors ml-0.5"
                       aria-label={`Remove ${file.name}`}
                     >
@@ -274,7 +200,7 @@ export default function FileUpload() {
                     <span className="ml-1.5">Parsing...</span>
                   </>
                 ) : (
-                  `Parse ${files.length} File${files.length !== 1 ? "s" : ""}`
+                  `Parse ${pendingFiles.length} File${pendingFiles.length !== 1 ? "s" : ""}`
                 )}
               </Button>
             </div>
@@ -282,7 +208,6 @@ export default function FileUpload() {
         </div>
       </div>
 
-      {/* Results Card */}
       {results && results.length > 0 && (
         <div className="rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
           <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-5 py-3">

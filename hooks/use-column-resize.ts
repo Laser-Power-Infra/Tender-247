@@ -10,9 +10,13 @@ function computeDefaultWidth(columnCount: number): number {
   return Math.min(Math.max(900 / columnCount, 130), 280);
 }
 
+function cssVar(col: string): string {
+  return `--colw-${col.replace(/[^a-z0-9]/gi, "_")}`;
+}
+
 export function useColumnResize(
   columns: string[],
-  options?: { minWidth?: number; maxWidth?: number }
+  options?: { minWidth?: number; maxWidth?: number },
 ) {
   const minWidth = options?.minWidth ?? DEFAULT_MIN_WIDTH;
   const maxWidth = options?.maxWidth ?? DEFAULT_MAX_WIDTH;
@@ -26,6 +30,11 @@ export function useColumnResize(
     }
     return map;
   });
+  const widthsRef = useRef(widths);
+
+  useEffect(() => {
+    widthsRef.current = widths;
+  }, [widths]);
 
   const isResizingRef = useRef(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -50,7 +59,11 @@ export function useColumnResize(
           changed = true;
         }
       }
-      return changed ? map : prev;
+      if (changed) {
+        widthsRef.current = map;
+        return map;
+      }
+      return prev;
     });
   }, [columns, defaultWidth]);
 
@@ -58,32 +71,41 @@ export function useColumnResize(
     (e: PointerEvent) => {
       if (!isResizingRef.current || !activeColRef.current) return;
 
-      const diff = e.clientX - startXRef.current;
-      const newWidth = Math.max(
-        minWidth,
-        Math.min(maxWidth, startWidthRef.current + diff)
-      );
-
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(() => {
-        setWidths((prev) => {
-          const map = new Map(prev);
-          map.set(activeColRef.current!, newWidth);
-          return map;
-        });
+        const diff = e.clientX - startXRef.current;
+        const newWidth = Math.max(
+          minWidth,
+          Math.min(maxWidth, startWidthRef.current + diff),
+        );
+        const col = activeColRef.current!;
+        widthsRef.current.set(col, newWidth);
+        document.documentElement.style.setProperty(
+          cssVar(col),
+          `${newWidth}px`,
+        );
       });
     },
-    [minWidth, maxWidth]
+    [minWidth, maxWidth],
   );
 
   const handlePointerUp = useCallback(() => {
+    const col = activeColRef.current;
     isResizingRef.current = false;
     setIsResizing(false);
     activeColRef.current = null;
+
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+
+    if (col) {
+      document.documentElement.style.removeProperty(cssVar(col));
+    }
+
+    setWidths(new Map(widthsRef.current));
+
     document.removeEventListener("pointermove", handlePointerMove);
     document.removeEventListener("pointerup", handlePointerUp);
     document.body.style.cursor = "";
@@ -99,8 +121,8 @@ export function useColumnResize(
   }, [handlePointerMove, handlePointerUp]);
 
   const getWidth = useCallback(
-    (col: string): number => widths.get(col) ?? defaultWidth,
-    [widths, defaultWidth]
+    (col: string): number => widthsRef.current.get(col) ?? defaultWidth,
+    [defaultWidth],
   );
 
   const getResizeHandlers = useCallback(
@@ -112,7 +134,12 @@ export function useColumnResize(
         setIsResizing(true);
         activeColRef.current = col;
         startXRef.current = e.clientX;
-        startWidthRef.current = widths.get(col) ?? defaultWidth;
+        startWidthRef.current = widthsRef.current.get(col) ?? defaultWidth;
+
+        document.documentElement.style.setProperty(
+          cssVar(col),
+          `${startWidthRef.current}px`,
+        );
 
         document.addEventListener("pointermove", handlePointerMove);
         document.addEventListener("pointerup", handlePointerUp);
@@ -120,7 +147,7 @@ export function useColumnResize(
         document.body.style.userSelect = "none";
       },
     }),
-    [widths, defaultWidth, handlePointerMove, handlePointerUp]
+    [defaultWidth, handlePointerMove, handlePointerUp],
   );
 
   return { getWidth, getResizeHandlers, isResizing };

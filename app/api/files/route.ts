@@ -3,38 +3,21 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET(request: NextRequest) {
   try {
-    const dateStr = request.nextUrl.searchParams.get("date");
-    if (!dateStr) {
+    const fromStr = request.nextUrl.searchParams.get("from");
+    const toStr = request.nextUrl.searchParams.get("to");
+    if (!fromStr || !toStr) {
       return NextResponse.json(
-        { error: "date query parameter is required (YYYY-MM-DD)" },
+        { error: "from and to query parameters are required (YYYY-MM-DD)" },
         { status: 400 },
       );
     }
 
-    // const files = await prisma.$queryRaw<any[]>`
-    //   SELECT
-    //     id,
-    //     "fileName",
-    //     "filePath",
-    //     "fileType",
-    //     "fileSize",
-    //     "uploadedBy",
-    //     status,
-    //     "totalCount",
-    //     "excludedCount",
-    //     "createdAt",
-    //     "updatedAt"
-    //   FROM files
-    //   WHERE DATE(created_at) = ${dateStr}::date
-    //   ORDER BY created_at DESC
-    // `;
-    console.log(dateStr);
-    const start = new Date(`${dateStr}T00:00:00.000`);
-    const end = new Date(`${dateStr}T23:59:59.999`);
+    const start = new Date(`${fromStr}T00:00:00.000`);
+    const end = new Date(`${toStr}T23:59:59.999`);
 
     const files = await prisma.file.findMany({
       where: {
-        createdAt: {
+        updatedAt: {
           gte: start,
           lte: end,
         },
@@ -43,7 +26,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ files });
   } catch (error) {
-    console.error("Files fetch error:", error);
+    console.error("Files fetch error:", error instanceof Error ? error.message : error, error instanceof Error ? error.stack : "");
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Internal server error",

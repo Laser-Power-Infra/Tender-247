@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 
 interface FlatRow {
   type: "Gem" | "Non-Gem";
+  id: string;
   [key: string]: string;
 }
 
@@ -31,15 +32,21 @@ const NON_GEM_DISPLAY_FIELDS = [
 ] as const;
 
 const ALL_KNOWN_FIELDS = [
-  ...new Set([...GEM_DISPLAY_FIELDS, ...NON_GEM_DISPLAY_FIELDS]),
+  ...new Set([
+    ...GEM_DISPLAY_FIELDS,
+    ...NON_GEM_DISPLAY_FIELDS,
+    "aiRelevanceValid",
+    "aiRelevanceReason",
+  ]),
 ];
 
 function flattenTender(
   tender: Record<string, unknown>,
   extraFields: { fieldName: string; fieldValue: string | null }[],
-  type: "Gem" | "Non-Gem"
+  type: "Gem" | "Non-Gem",
+  id: number,
 ): FlatRow {
-  const row: FlatRow = { type };
+  const row: FlatRow = { type, id: String(id) };
 
   for (const field of ALL_KNOWN_FIELDS) {
     const val = tender[field];
@@ -90,10 +97,10 @@ export async function GET(request: NextRequest) {
     const rows: FlatRow[] = [];
 
     for (const t of gemTenders) {
-      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Gem"));
+      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Gem", t.id));
     }
     for (const t of nonGemTenders) {
-      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Non-Gem"));
+      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Non-Gem", t.id));
     }
 
     const allExtraFieldNames = [
@@ -104,7 +111,7 @@ export async function GET(request: NextRequest) {
       ),
     ];
 
-    const columns = ["type", ...ALL_KNOWN_FIELDS, ...allExtraFieldNames];
+    const columns = ["type", "id", ...ALL_KNOWN_FIELDS, ...allExtraFieldNames];
 
     return NextResponse.json({
       fileName: fileRecord.fileName,
