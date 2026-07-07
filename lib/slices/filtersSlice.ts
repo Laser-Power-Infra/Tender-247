@@ -1,6 +1,7 @@
 import { createSlice } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import type { SortingState, ColumnSizingState, VisibilityState } from "@tanstack/react-table";
+import type { ColumnFilterState, ColumnFilterType } from "@/lib/types";
 
 type DeadlinePreset = "thisWeek" | "thisMonth" | "thisYear";
 
@@ -16,6 +17,7 @@ interface FiltersState {
   typeFilter: "all" | "Gem" | "Non-Gem";
   aiRelevanceFilter: "all" | "yes" | "no";
   showFilterTray: boolean;
+  columnFilters: Record<string, ColumnFilterState>;
 }
 
 const initialState: FiltersState = {
@@ -30,6 +32,7 @@ const initialState: FiltersState = {
   typeFilter: "all",
   aiRelevanceFilter: "all",
   showFilterTray: false,
+  columnFilters: {},
 };
 
 export const filtersSlice = createSlice({
@@ -82,6 +85,60 @@ export const filtersSlice = createSlice({
     setShowFilterTray(state, action: PayloadAction<boolean>) {
       state.showFilterTray = action.payload;
     },
+    setColumnFilter(state, action: PayloadAction<{ accessor: string; filterType: ColumnFilterType; value: unknown }>) {
+      const { accessor, filterType, value } = action.payload;
+      const currentFilter = state.columnFilters[accessor] || {};
+
+      switch (filterType) {
+        case "dateRange":
+          state.columnFilters[accessor] = {
+            ...currentFilter,
+            dateRange: value as { startDate: string; endDate: string },
+          };
+          break;
+        case "select":
+          state.columnFilters[accessor] = {
+            ...currentFilter,
+            select: value as string,
+          };
+          break;
+        case "text":
+          state.columnFilters[accessor] = {
+            ...currentFilter,
+            text: value as string,
+          };
+          break;
+        case "boolean":
+          state.columnFilters[accessor] = {
+            ...currentFilter,
+            boolean: value as boolean | null,
+          };
+          break;
+      }
+    },
+    clearColumnFilter(state, action: PayloadAction<{ accessor: string; filterType: ColumnFilterType }>) {
+      const { accessor, filterType } = action.payload;
+      const currentFilter = state.columnFilters[accessor];
+      if (!currentFilter) return;
+
+      switch (filterType) {
+        case "dateRange":
+          state.columnFilters[accessor] = { ...currentFilter, dateRange: undefined };
+          break;
+        case "select":
+          state.columnFilters[accessor] = { ...currentFilter, select: undefined };
+          break;
+        case "text":
+          state.columnFilters[accessor] = { ...currentFilter, text: undefined };
+          break;
+        case "boolean":
+          state.columnFilters[accessor] = { ...currentFilter, boolean: undefined };
+          break;
+      }
+    },
+    resetColumnFilters(state) {
+      state.columnFilters = {};
+    },
     resetAllFilters(state) {
       state.exclusionFilter = null;
       state.deadlinePreset = null;
@@ -107,6 +164,9 @@ export const {
   setAiRelevanceFilter,
   toggleFilterTray,
   setShowFilterTray,
+  setColumnFilter,
+  clearColumnFilter,
+  resetColumnFilters,
   resetAllFilters,
 } = filtersSlice.actions;
 

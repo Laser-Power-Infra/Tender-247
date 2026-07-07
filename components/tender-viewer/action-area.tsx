@@ -24,9 +24,9 @@ export default function ActionArea() {
   };
 
   return (
-    <div className="h-full flex flex-col rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
-      <div className="bg-gradient-to-r from-primary to-primary/80 px-5 py-3.5 flex items-center gap-2.5">
-        <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-white/10">
+    <div className="h-full flex flex-col rounded-sm bg-white border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-gradient-to-r from-primary to-primary/80 px-4 py-3 flex items-center gap-2.5">
+        <div className="flex items-center justify-center w-6 h-6 rounded-sm bg-white/10">
           <Eye className="size-3.5 text-primary-foreground/80" />
         </div>
         <div>
@@ -39,9 +39,9 @@ export default function ActionArea() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col gap-4 p-5">
+      <div className="flex-1 flex flex-col gap-4 p-4">
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">
             Updated At
           </label>
           <Popover>
@@ -49,7 +49,7 @@ export default function ActionArea() {
               render={
                 <Button
                   variant="outline"
-                  className="w-full justify-start px-2.5 font-normal"
+                  className="w-full justify-start px-2.5 font-normal rounded-sm"
                 >
                   <CalendarIcon data-icon="inline-start" />
                   {selectedRange.from ? (

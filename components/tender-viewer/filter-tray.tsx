@@ -17,7 +17,7 @@ import { Calendar } from "@/components/ui/calendar";
 import {
   startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear,
 } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { RotateCcw, ListFilter } from "lucide-react";
 
 export default function FilterTray() {
@@ -46,12 +46,10 @@ export default function FilterTray() {
     if (deadlinePreset === "thisMonth") return "This Month";
     if (deadlinePreset === "thisYear") return "This Year";
     if (deadlineDateFrom && deadlineDateTo) {
-      const f = new Date(deadlineDateFrom).toLocaleDateString();
-      const t = new Date(deadlineDateTo).toLocaleDateString();
-      return `${f} - ${t}`;
+      return `${formatDate(deadlineDateFrom)} - ${formatDate(deadlineDateTo)}`;
     }
     if (deadlineDateFrom) {
-      return new Date(deadlineDateFrom).toLocaleDateString();
+      return formatDate(deadlineDateFrom);
     }
     return null;
   }, [deadlinePreset, deadlineDateFrom, deadlineDateTo]);
@@ -142,7 +140,7 @@ export default function FilterTray() {
               {showDeadlinePopup && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowDeadlinePopup(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 rounded-lg bg-white shadow-md ring-1 ring-slate-200 p-3">
+                  <div className="absolute right-0 top-full mt-1 z-50 rounded-sm bg-white shadow-md ring-1 ring-slate-200 p-3">
                     <Calendar
                       mode="range"
                       defaultMonth={new Date()}

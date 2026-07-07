@@ -12,6 +12,14 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Decision {
+  YES
+  NO
+  NOT_DECIDED
+
+  @@map("decision")
+}
+
 // ---------- FILES ----------
 model File {
   id        Int      @id @default(autoincrement())
@@ -117,10 +125,15 @@ model GemTender {
 
   tenderFileUrl String?
 
+  app  Decision @default(NOT_DECIDED)
+  aps  Decision @default(NOT_DECIDED)
+  apm  Decision @default(NOT_DECIDED)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   extraFields TenderExtraField[]
+  tenderAssociations TenderAssociation[]
 
   @@index([fileId])
   @@map("gem_tenders")
@@ -169,10 +182,15 @@ model NonGemTender {
 
   tenderFileUrl String?
 
+  app  Decision @default(NOT_DECIDED)
+  aps  Decision @default(NOT_DECIDED)
+  apm  Decision @default(NOT_DECIDED)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   extraFields TenderExtraField[]
+  tenderAssociations TenderAssociation[]
 
   @@index([fileId])
   @@map("non_gem_tenders")
@@ -207,6 +225,42 @@ model ExlusionKeywords{
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ---------- ASSOCIATION ----------
+model Association {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenderAssociations TenderAssociation[]
+
+  @@map("associations")
+}
+
+model TenderAssociation {
+  id           Int      @id @default(autoincrement())
+
+  gemTenderId Int?
+  gemTender   GemTender? @relation(fields: [gemTenderId], references: [id], onDelete: Cascade)
+
+  nonGemTenderId Int?
+  nonGemTender   NonGemTender? @relation(fields: [nonGemTenderId], references: [id], onDelete: Cascade)
+
+  associationId Int
+  association   Association @relation(fields: [associationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([gemTenderId, associationId])
+  @@unique([nonGemTenderId, associationId])
+  @@index([gemTenderId])
+  @@index([nonGemTenderId])
+  @@index([associationId])
+  @@map("tender_associations")
 }
 
 

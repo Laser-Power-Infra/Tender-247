@@ -1,11 +1,13 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import pLimit from "p-limit";
+import { updateTenderDecision, updateTenderAssignmentsAction } from "@/actions/tender";
 
 export interface TenderData {
   fileName: string;
   columns: string[];
   rows: Record<string, string>[];
+  associations: { id: number; name: string; email: string }[];
   totalGem: number;
   totalNonGem: number;
 }
@@ -23,6 +25,42 @@ const initialState: TendersState = {
   totalFiles: 0,
   completedFiles: 0,
 };
+
+export const updateTenderAssignments = createAsyncThunk(
+  "tenders/updateAssignments",
+  async (params: {
+    rowIndex: number;
+    gemTenderId?: number;
+    nonGemTenderId?: number;
+    associationIds: number[];
+    oldValue: string;
+  }) => {
+    await updateTenderAssignmentsAction({
+      gemTenderId: params.gemTenderId,
+      nonGemTenderId: params.nonGemTenderId,
+      associationIds: params.associationIds,
+    });
+  },
+);
+
+export const updateTenderCell = createAsyncThunk(
+  "tenders/updateCell",
+  async (params: {
+    rowIndex: number;
+    field: string;
+    value: string;
+    type: "Gem" | "Non-Gem";
+    id: number;
+    oldValue: string;
+  }) => {
+    await updateTenderDecision({
+      type: params.type,
+      id: params.id,
+      field: params.field as "app" | "aps" | "apm",
+      value: params.value as "YES" | "NO" | "NOT_DECIDED",
+    });
+  },
+);
 
 export const fetchTendersIncremental = createAsyncThunk(
   "tenders/fetchTendersIncremental",
@@ -70,6 +108,7 @@ export const tendersSlice = createSlice({
           fileName: `Files (1/${state.totalFiles})`,
           columns: [...incoming.columns],
           rows: [...incoming.rows],
+          associations: incoming.associations ?? [],
           totalGem: incoming.totalGem,
           totalNonGem: incoming.totalNonGem,
         };
@@ -99,6 +138,42 @@ export const tendersSlice = createSlice({
   extraReducers: (builder) => {
     builder.addCase(fetchTendersIncremental.rejected, (state) => {
       state.loading = false;
+    });
+    builder.addCase(updateTenderCell.pending, (state, action) => {
+      const { rowIndex, field, value } = action.meta.arg;
+      if (state.data?.rows[rowIndex]) {
+        state.data.rows[rowIndex][field] = value;
+      }
+    });
+    builder.addCase(updateTenderCell.fulfilled, (state, action) => {
+      const { rowIndex, field, value } = action.meta.arg;
+      if (state.data?.rows[rowIndex]) {
+        state.data.rows[rowIndex][field] = value;
+      }
+    });
+    builder.addCase(updateTenderCell.rejected, (state, action) => {
+      const { rowIndex, field, oldValue } = action.meta.arg;
+      if (state.data?.rows[rowIndex]) {
+        state.data.rows[rowIndex][field] = oldValue;
+      }
+    });
+    builder.addCase(updateTenderAssignments.pending, (state, action) => {
+      const { rowIndex, associationIds } = action.meta.arg;
+      if (state.data?.rows[rowIndex]) {
+        state.data.rows[rowIndex].assignedTo = associationIds.join(",");
+      }
+    });
+    builder.addCase(updateTenderAssignments.fulfilled, (state, action) => {
+      const { rowIndex, associationIds } = action.meta.arg;
+      if (state.data?.rows[rowIndex]) {
+        state.data.rows[rowIndex].assignedTo = associationIds.join(",");
+      }
+    });
+    builder.addCase(updateTenderAssignments.rejected, (state, action) => {
+      const { rowIndex, oldValue } = action.meta.arg;
+      if (state.data?.rows[rowIndex]) {
+        state.data.rows[rowIndex].assignedTo = oldValue;
+      }
     });
   },
 });

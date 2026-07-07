@@ -1,5 +1,5 @@
 const GEM_FIELDS = new Set([
-  "referenceNo", "tenderBrief", "value", "deadline", "location",
+  "referenceNo", "tenderBrief", "value", "deadline", "app", "aps", "apm", "location",
   "organization", "documentFees", "emd", "msmeExemption",
   "startupExemption", "quantity", "bidOpeningDateTime",
   "bidOfferValidity", "ministryStateName", "departmentName",
@@ -20,7 +20,7 @@ const GEM_FIELDS = new Set([
 ]);
 
 const NON_GEM_FIELDS = new Set([
-  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline",
+  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline", "app", "aps", "apm",
   "location", "organization", "documentFees", "emd",
   "msmeExemption", "startupExemption", "quantity", "checklist",
   "t247Id", "scrapedDate", "source", "assignedTo",

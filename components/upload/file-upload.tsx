@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +47,23 @@ export default function FileUpload() {
   const pendingFiles = useAppSelector((s) => s.upload.pendingFiles);
   const parsing = useAppSelector((s) => s.upload.parsing);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragCounter = useRef(0);
+
+  useEffect(() => {
+    const preventDefault = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    document.addEventListener("dragenter", preventDefault);
+    document.addEventListener("dragover", preventDefault);
+    document.addEventListener("drop", preventDefault);
+    return () => {
+      document.removeEventListener("dragenter", preventDefault);
+      document.removeEventListener("dragover", preventDefault);
+      document.removeEventListener("drop", preventDefault);
+    };
+  }, []);
 
   const handleUploadClick = useCallback(() => {
     inputRef.current?.click();
@@ -62,6 +79,41 @@ export default function FileUpload() {
     [dispatch],
   );
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(false);
+      dragCounter.current = 0;
+      if (e.dataTransfer.files?.length) {
+        dispatch(addFiles(e.dataTransfer.files));
+      }
+    },
+    [dispatch],
+  );
+
   const handleParse = useCallback(async () => {
     if (!pendingFiles.length) return;
     dispatch(uploadFiles(pendingFiles));
@@ -69,19 +121,19 @@ export default function FileUpload() {
 
   return (
     <div className="h-full flex flex-col space-y-4">
-      <div className="flex-1 flex flex-col rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
-        <div className="bg-gradient-to-r from-primary to-primary/80 px-5 py-3.5 flex items-center justify-between">
+      <div className="flex-1 flex flex-col rounded-sm bg-white border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-primary to-primary/80 px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-white/10">
+            <div className="flex items-center justify-center w-6 h-6 rounded-sm bg-white/10">
               <UploadIcon />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-white tracking-wide">
                 Upload Tenders
               </h3>
-              <p className="text-[11px] text-primary/60">
+              {/* <p className="text-[11px] text-primary/60">
                 Excel files (.xlsx, .xls)
-              </p>
+              </p> */}
             </div>
           </div>
           <Button
@@ -89,10 +141,10 @@ export default function FileUpload() {
             size="sm"
             onClick={handleUploadClick}
             disabled={parsing}
-            className="text-white hover:bg-white/10 hover:text-white border border-white/20 text-xs h-8 px-3 rounded-lg transition-all"
+            className="text-white hover:bg-white/10 hover:text-white border border-white/20 text-xs h-7 px-2.5 rounded-sm transition-all"
           >
             <UploadIcon />
-            <span className="ml-1.5">Browse</span>
+            {/* <span className="ml-1.5">Browse</span> */}
           </Button>
         </div>
 
@@ -105,19 +157,31 @@ export default function FileUpload() {
           onChange={handleInputChange}
         />
 
-        <div className="flex-1 flex flex-col p-5">
+        <div className="flex-1 flex flex-col p-4">
           {pendingFiles.length === 0 && (
             <div
-              className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-lg p-6 cursor-pointer hover:border-primary/30 hover:bg-primary/5 transition-all"
+              className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-sm p-4 cursor-pointer transition-all ${
+                isDragOver
+                  ? "border-primary bg-primary/10 scale-[1.02]"
+                  : "border-slate-200 hover:border-primary/30 hover:bg-primary/5"
+              }`}
               onClick={handleUploadClick}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
             >
-              <div className="w-10 h-10 rounded-full bg-primary/5 flex items-center justify-center mb-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-3 transition-colors ${
+                isDragOver ? "bg-primary/15" : "bg-primary/5"
+              }`}>
                 <svg className="size-5 text-primary/60" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
                 </svg>
               </div>
-              <p className="text-xs text-slate-500 text-center">
-                Click to browse or drag files here
+              <p className={`text-xs text-center transition-colors ${
+                isDragOver ? "text-primary font-medium" : "text-slate-500"
+              }`}>
+                {isDragOver ? "Drop files here" : "Click to browse or drag files here"}
               </p>
               <p className="text-[10px] text-slate-400 mt-0.5">
                 .xlsx and .xls files supported
@@ -132,7 +196,7 @@ export default function FileUpload() {
                   <Badge
                     key={file.name + file.size}
                     variant="secondary"
-                    className="inline-flex items-center gap-1.5 py-1.5 pr-1 pl-2.5 text-xs font-normal max-w-full rounded-lg bg-slate-100 text-slate-700 border border-slate-200"
+                    className="inline-flex items-center gap-1.5 py-1.5 pr-1 pl-2.5 text-xs font-normal max-w-full rounded-sm bg-slate-100 text-slate-700 border border-slate-200"
                   >
                     <span className="truncate">{file.name}</span>
                     <span className="shrink-0 text-[10px] text-slate-400">
@@ -141,7 +205,7 @@ export default function FileUpload() {
                     <button
                       type="button"
                       onClick={() => dispatch(removeFile(i))}
-                      className="flex shrink-0 items-center justify-center rounded-md p-0.5 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors ml-0.5"
+                      className="flex shrink-0 items-center justify-center rounded-sm p-0.5 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors ml-0.5"
                       aria-label={`Remove ${file.name}`}
                     >
                       <XIcon />
@@ -154,7 +218,7 @@ export default function FileUpload() {
                 size="sm"
                 onClick={handleParse}
                 disabled={parsing}
-                className="bg-primary text-primary-foreground hover:bg-primary/80 rounded-lg h-9 px-5 text-xs font-medium transition-all shadow-sm"
+                className="bg-primary text-primary-foreground hover:bg-primary/80 rounded-sm h-8 px-4 text-xs font-medium transition-all shadow-sm"
               >
                 {parsing ? (
                   <>

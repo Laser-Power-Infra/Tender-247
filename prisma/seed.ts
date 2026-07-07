@@ -22,6 +22,32 @@ async function main() {
     skipDuplicates: true,
   });
 
+  await prisma.association.createMany({
+    data: [
+      {
+        name: "Sandip Das",
+        email: "sandip.das@laserpowerinfra.com",
+      },
+      {
+        name: "Salil Dutta",
+        email: "lasertender.six@gmail.com",
+      },
+      {
+        name: "Dolly",
+        email: "execution@gmdalui.co.in",
+      },
+      {
+        name: "Ram Mohan Roy",
+        email: "lasertender.one@gmail.com",
+      },
+      {
+        name: "Pritha",
+        email: "sales@laserpowerinfra.com",
+      },
+    ],
+    skipDuplicates: true,
+  });
+
   console.log("✅ Seed completed.");
 }
 

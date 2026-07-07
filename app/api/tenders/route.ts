@@ -7,8 +7,13 @@ interface FlatRow {
   [key: string]: string;
 }
 
+interface AssociationInfo {
+  id: number;
+  name: string;
+}
+
 const GEM_DISPLAY_FIELDS = [
-  "referenceNo", "tenderBrief", "value", "deadline", "location",
+  "referenceNo", "tenderBrief", "value", "deadline", "app", "aps", "apm", "assignedTo", "location",
   "organization", "documentFees", "emd", "msmeExemption",
   "startupExemption", "quantity", "bidOpeningDateTime",
   "bidOfferValidity", "ministryStateName", "departmentName",
@@ -29,7 +34,7 @@ const GEM_DISPLAY_FIELDS = [
 ] as const;
 
 const NON_GEM_DISPLAY_FIELDS = [
-  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline",
+  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline", "app", "aps", "apm", "assignedTo",
   "location", "organization", "documentFees", "emd",
   "msmeExemption", "startupExemption", "quantity", "checklist",
   "t247Id", "scrapedDate", "source", "assignedTo",
@@ -53,7 +58,9 @@ function flattenTender(
   extraFields: { fieldName: string; fieldValue: string | null }[],
   type: "Gem" | "Non-Gem",
   id: number,
+  tenderAssociations: { association: AssociationInfo }[],
 ): FlatRow {
+  const assignedIds = tenderAssociations.map((ta) => ta.association.id).join(",");
   const row: FlatRow = { type, id: String(id) };
 
   for (const field of ALL_KNOWN_FIELDS) {
@@ -64,6 +71,8 @@ function flattenTender(
       row[field] = val == null ? "" : String(val);
     }
   }
+
+  row.assignedTo = assignedIds;
 
   for (const ef of extraFields) {
     row[ef.fieldName] = ef.fieldValue ?? "";
@@ -91,24 +100,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
-    const [gemTenders, nonGemTenders] = await Promise.all([
+    const [gemTenders, nonGemTenders, allAssociations] = await Promise.all([
       prisma.gemTender.findMany({
         where: { fileId },
-        include: { extraFields: true },
+        include: { extraFields: true, tenderAssociations: { include: { association: true } } },
       }),
       prisma.nonGemTender.findMany({
         where: { fileId },
-        include: { extraFields: true },
+        include: { extraFields: true, tenderAssociations: { include: { association: true } } },
       }),
+      prisma.association.findMany({ select: { id: true, name: true, email: true } }),
     ]);
+
+    console.log("associations count:", allAssociations.length, allAssociations);
 
     const rows: FlatRow[] = [];
 
     for (const t of gemTenders) {
-      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Gem", t.id));
+      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Gem", t.id, t.tenderAssociations));
     }
     for (const t of nonGemTenders) {
-      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Non-Gem", t.id));
+      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Non-Gem", t.id, t.tenderAssociations));
     }
 
     const allExtraFieldNames = [
@@ -125,6 +137,7 @@ export async function GET(request: NextRequest) {
       fileName: fileRecord.fileName,
       columns,
       rows,
+      associations: allAssociations,
       totalGem: gemTenders.length,
       totalNonGem: nonGemTenders.length,
     });

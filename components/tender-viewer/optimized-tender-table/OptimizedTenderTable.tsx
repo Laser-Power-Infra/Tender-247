@@ -1,0 +1,684 @@
+"use client";
+
+import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import "./OptimizedTenderTable.css";
+import {
+  DateRangeColumnFilter,
+  SelectColumnFilter,
+  TextColumnFilter,
+  BooleanColumnFilter,
+} from "./filters";
+import { format } from "date-fns";
+import { useAppDispatch, useAppSelector } from "@/lib/hooks";
+import { setColumnFilter, clearColumnFilter as clearColumnFilterAction } from "@/lib/slices/filtersSlice";
+import type {
+  ColumnFilterType,
+  FilterOption,
+  ColumnFilterConfig,
+  ColumnFilterState,
+} from "@/lib/types";
+
+export type { ColumnFilterType, FilterOption, ColumnFilterConfig, ColumnFilterState };
+
+export interface ColumnDef<T> {
+  header: string;
+  accessor: keyof T | string;
+  defaultWidth?: number;
+  align?: "left" | "right" | "center";
+  type?: "string" | "number" | "date" | "boolean" | "percentage" | "currency" | "status" | "decision" | "custom";
+  filter?: ColumnFilterConfig;
+  sortable?: boolean;
+  resizable?: boolean;
+  renderCell?: (value: unknown, row: T) => React.ReactNode;
+  renderExpanded?: (row: T) => React.ReactNode;
+}
+
+export interface OptimizedTenderTableProps<T extends Record<string, unknown>> {
+  columns: ColumnDef<T>[];
+  rows: T[];
+  title?: string;
+  rowKey?: keyof T;
+  onRowClick?: (row: T) => void;
+}
+
+export function OptimizedTenderTable<T extends Record<string, unknown>>({
+  columns,
+  rows,
+  title = "Data Table",
+  rowKey = "id" as keyof T,
+  onRowClick,
+}: OptimizedTenderTableProps<T>) {
+  const [globalSearch, setGlobalSearch] = useState<string>("");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [rowsPerPage, setRowsPerPage] = useState<number>(50);
+  
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    const initialWidths: Record<string, number> = {};
+    columns.forEach(col => {
+      initialWidths[String(col.accessor)] = col.defaultWidth ?? 150;
+    });
+    return initialWidths;
+  });
+
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+  
+  const dispatch = useAppDispatch();
+  const columnFilters = useAppSelector((s) => s.filters.columnFilters);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const resizingColumnRef = useRef<string | null>(null);
+  const startXRef = useRef<number>(0);
+  const startWidthRef = useRef<number>(0);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent, accessor: string, currentWidth: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizingColumnRef.current = accessor;
+    startXRef.current = e.clientX;
+    startWidthRef.current = currentWidth;
+    document.addEventListener("mousemove", handleResizeMove);
+    document.addEventListener("mouseup", handleResizeEnd);
+    document.body.style.cursor = "col-resize";
+  }, []);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingColumnRef.current) return;
+    const diff = e.clientX - startXRef.current;
+    const newWidth = Math.max(50, startWidthRef.current + diff);
+    setColumnWidths(prev => ({
+      ...prev,
+      [resizingColumnRef.current!]: newWidth
+    }));
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    resizingColumnRef.current = null;
+    document.removeEventListener("mousemove", handleResizeMove);
+    document.removeEventListener("mouseup", handleResizeEnd);
+    document.body.style.cursor = "default";
+  }, [handleResizeMove]);
+
+  const handleSort = useCallback((accessor: string) => {
+    const col = columns.find(c => String(c.accessor) === accessor);
+    if (!col || col.filter?.type === "boolean") return;
+    
+    if (sortColumn === accessor) {
+      setSortDirection(prev => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(accessor);
+      setSortDirection("desc");
+    }
+    setCurrentPage(1);
+  }, [sortColumn, columns]);
+
+  const toggleRowExpansion = useCallback((keyValue: string) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [keyValue]: !prev[keyValue]
+    }));
+  }, []);
+
+  const getRowKey = useCallback((row: T): string => {
+    const type = row["type" as keyof T];
+    const id = row[rowKey];
+    if (id !== undefined) {
+      return type !== undefined ? `${String(type)}-${String(id)}` : String(id);
+    }
+    return Math.random().toString();
+  }, [rowKey]);
+
+  const processedRows = useMemo(() => {
+    let result = [...rows];
+
+    if (globalSearch.trim() !== "") {
+      const searchLower = globalSearch.toLowerCase().trim();
+      result = result.filter(row => {
+        return columns.some(col => {
+          if (col.filter?.type === "boolean") return false;
+          const val = row[col.accessor as keyof T];
+          if (val === null || val === undefined) return false;
+          return String(val).toLowerCase().includes(searchLower);
+        });
+      });
+    }
+
+    columns.forEach(col => {
+      const accessorStr = String(col.accessor);
+      const filterState = columnFilters[accessorStr];
+      if (!filterState) return;
+
+      if (col.filter?.type === "dateRange" && filterState.dateRange) {
+        const { startDate, endDate } = filterState.dateRange;
+        if (startDate || endDate) {
+          result = result.filter(row => {
+            const val = row[col.accessor as keyof T];
+            if (!(val instanceof Date) && typeof val !== "string" && typeof val !== "number") return true;
+            
+            const dateVal = val instanceof Date ? val : new Date(String(val));
+            if (isNaN(dateVal.getTime())) return true;
+            
+            if (startDate) {
+              const start = new Date(startDate);
+              start.setHours(0, 0, 0, 0);
+              if (dateVal < start) return false;
+            }
+            
+            if (endDate) {
+              const end = new Date(endDate);
+              end.setHours(23, 59, 59, 999);
+              if (dateVal > end) return false;
+            }
+            
+            return true;
+          });
+        }
+      }
+
+      if (col.filter?.type === "select" && filterState.select) {
+        result = result.filter(row => {
+          const val = row[col.accessor as keyof T];
+          return String(val) === filterState.select;
+        });
+      }
+
+      if (col.filter?.type === "text" && filterState.text) {
+        const textLower = filterState.text.toLowerCase();
+        result = result.filter(row => {
+          const val = row[col.accessor as keyof T];
+          if (val === null || val === undefined) return false;
+          return String(val).toLowerCase().includes(textLower);
+        });
+      }
+
+      if (col.filter?.type === "boolean" && filterState.boolean !== null && filterState.boolean !== undefined) {
+        result = result.filter(row => {
+          const val = row[col.accessor as keyof T];
+          return Boolean(val) === filterState.boolean;
+        });
+      }
+    });
+
+    if (sortColumn) {
+      result.sort((a, b) => {
+        const valA = a[sortColumn as keyof T];
+        const valB = b[sortColumn as keyof T];
+
+        if (valA === null || valA === undefined) return sortDirection === "asc" ? -1 : 1;
+        if (valB === null || valB === undefined) return sortDirection === "asc" ? 1 : -1;
+
+        if (valA instanceof Date && valB instanceof Date) {
+          return sortDirection === "asc"
+            ? valA.getTime() - valB.getTime()
+            : valB.getTime() - valA.getTime();
+        }
+
+        if (typeof valA === "number" && typeof valB === "number") {
+          return sortDirection === "asc" ? valA - valB : valB - valA;
+        }
+
+        return sortDirection === "asc"
+          ? String(valA).localeCompare(String(valB))
+          : String(valB).localeCompare(String(valA));
+      });
+    }
+
+    return result;
+  }, [rows, globalSearch, sortColumn, sortDirection, columns, columnFilters]);
+
+  const totalRecords = processedRows.length;
+  const totalPages = Math.ceil(totalRecords / rowsPerPage) || 1;
+  
+  const activePage = Math.min(currentPage, totalPages);
+  
+  const paginatedRows = useMemo(() => {
+    const startIndex = (activePage - 1) * rowsPerPage;
+    return processedRows.slice(startIndex, startIndex + rowsPerPage);
+  }, [processedRows, activePage, rowsPerPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [globalSearch, rowsPerPage, columnFilters]);
+
+  const getCSVData = useCallback(() => {
+    const headers = columns.map(c => c.header).join(",");
+    const rowsData = processedRows.map(row => {
+      return columns.map(col => {
+        let val: unknown = row[col.accessor as keyof T];
+        if (val === null || val === undefined) return "";
+        if (val instanceof Date) return val.toLocaleDateString("en-GB");
+        
+        let strVal = String(val);
+        if (strVal.includes(",") || strVal.includes('"') || strVal.includes("\n")) {
+          strVal = `"${strVal.replace(/"/g, '""')}"`;
+        }
+        return strVal;
+      }).join(",");
+    });
+    return [headers, ...rowsData].join("\n");
+  }, [columns, processedRows]);
+
+  const handleExportCSV = useCallback(() => {
+    const csvContent = getCSVData();
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${title.replace(/\s+/g, "_")}_Data_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [getCSVData, title]);
+
+  const handleExportExcel = useCallback(() => {
+    const tableHeader = columns.map(c => `<th style="background-color:#0a2540;color:#ffffff;font-weight:bold;">${c.header}</th>`).join("");
+    const tableRows = processedRows.map(row => {
+      const cells = columns.map(col => {
+        let val: unknown = row[col.accessor as keyof T];
+        if (val === null || val === undefined) return "<td></td>";
+        if (val instanceof Date) return `<td>${val.toLocaleDateString("en-GB")}</td>`;
+        if (col.type === "currency") return `<td style="text-align:right;">${val}</td>`;
+        if (col.type === "percentage") return `<td style="text-align:right;">${((val as number) * 100).toFixed(1)}%</td>`;
+        return `<td>${String(val)}</td>`;
+      }).join("");
+      return `<tr>${cells}</tr>`;
+    }).join("");
+
+    const excelHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta http-equiv="Content-type" content="text/html;charset=utf-8" />
+        <![if gte o4 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Data</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]>
+      </head>
+      <body>
+        <table border="1">
+          <thead><tr>${tableHeader}</tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([excelHtml], { type: "application/vnd.ms-excel" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${title.replace(/\s+/g, "_")}_Data_${new Date().toISOString().split('T')[0]}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [columns, processedRows, title]);
+
+  const formatCurrency = useCallback((val: number | null | undefined): string => {
+    if (val === null || val === undefined) return "-";
+    return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(val);
+  }, []);
+
+  const formatDate = useCallback((val: Date | string | number | null | undefined): string => {
+    if (!val) return "-";
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return "-";
+    return format(d, "do MMM, yyyy");
+  }, []);
+
+  const formatPercentage = useCallback((val: number | null | undefined): string => {
+    if (val === null || val === undefined) return "-";
+    const prefix = val > 0 ? "+" : "";
+    return `${prefix}${(val * 100).toFixed(1)}%`;
+  }, []);
+
+  const updateColumnFilter = useCallback((accessor: string, filterType: ColumnFilterType, value: unknown) => {
+    dispatch(setColumnFilter({ accessor, filterType, value }));
+    setCurrentPage(1);
+  }, [dispatch]);
+
+  const handleClearColumnFilter = useCallback((accessor: string, filterType: ColumnFilterType) => {
+    dispatch(clearColumnFilterAction({ accessor, filterType }));
+    setCurrentPage(1);
+  }, [dispatch]);
+
+  const renderFilter = useCallback((col: ColumnDef<T>) => {
+    const accessorStr = String(col.accessor);
+    const filterState = columnFilters[accessorStr];
+    
+    if (!col.filter) return null;
+
+    switch (col.filter.type) {
+      case "dateRange":
+        return (
+          <DateRangeColumnFilter
+            startDate={filterState?.dateRange?.startDate ?? ""}
+            endDate={filterState?.dateRange?.endDate ?? ""}
+            onStartDateChange={(v) => updateColumnFilter(accessorStr, "dateRange", { startDate: v, endDate: filterState?.dateRange?.endDate ?? "" })}
+            onEndDateChange={(v) => updateColumnFilter(accessorStr, "dateRange", { startDate: filterState?.dateRange?.startDate ?? "", endDate: v })}
+            onClear={() => handleClearColumnFilter(accessorStr, "dateRange")}
+          />
+        );
+      case "select":
+        return (
+          <SelectColumnFilter
+            value={filterState?.select ?? ""}
+            onChange={(v) => updateColumnFilter(accessorStr, "select", v)}
+            options={col.filter.options ?? []}
+            placeholder={col.filter.placeholder}
+            searchable={col.filter.searchable}
+          />
+        );
+      case "text":
+        return (
+          <TextColumnFilter
+            value={filterState?.text ?? ""}
+            onChange={(v) => updateColumnFilter(accessorStr, "text", v)}
+            placeholder={col.filter.placeholder}
+          />
+        );
+      case "boolean":
+        return (
+          <BooleanColumnFilter
+            value={filterState?.boolean ?? null}
+            onChange={(v) => updateColumnFilter(accessorStr, "boolean", v)}
+          />
+        );
+      default:
+        return null;
+    }
+  }, [columnFilters, updateColumnFilter, handleClearColumnFilter]);
+
+  const renderCell = useCallback((col: ColumnDef<T>, row: T): React.ReactNode => {
+    const value = row[col.accessor as keyof T];
+
+    if (col.renderCell) {
+      return col.renderCell(value, row);
+    }
+
+    if (col.type === "currency") {
+      return formatCurrency(value as number | null | undefined);
+    }
+
+    if (col.type === "percentage") {
+      return formatPercentage(value as number | null | undefined);
+    }
+
+    if (col.type === "date") {
+      return formatDate(value as Date | string | number | null | undefined);
+    }
+
+    if (col.type === "boolean") {
+      const isTrue = Boolean(value);
+      return (
+        <span className={`ra-icon ${isTrue ? "applicable" : "not-applicable"}`}>
+          {isTrue ? "✔" : "○"}
+        </span>
+      );
+    }
+
+    if (col.type === "status") {
+      const statusVal = String(value ?? "").toUpperCase();
+      const statusClass = 
+        statusVal === "WON" ? "won" :
+        statusVal === "LOST" ? "lost" :
+        statusVal === "UNDER_EVALUATION" || statusVal === "EVAL" ? "eval" :
+        statusVal === "SUBMITTED" ? "submitted" :
+        statusVal === "RA_PENDING" || statusVal === "LOI" ? "loi" : "";
+      return (
+        <span className={`status-badge ${statusClass}`}>
+          {value != null ? String(value) : "-"}
+        </span>
+      );
+    }
+
+    if (col.type === "decision") {
+      const decVal = String(value ?? "").toUpperCase();
+      const decClass = decVal === "GO" ? "go" : decVal === "NO_GO" || decVal === "NOGO" ? "nogo" : "";
+      return (
+        <span className={`decision-badge ${decClass}`}>
+          {value != null ? String(value) : "-"}
+        </span>
+      );
+    }
+
+    return value !== null && value !== undefined ? String(value) : "-";
+  }, [formatCurrency, formatPercentage, formatDate]);
+
+  const getColumnAlignClass = useCallback((col: ColumnDef<T>): string => {
+    if (col.align === "right") return "col-currency";
+    if (col.align === "center") return "col-center";
+    if (col.type === "currency") return "col-currency";
+    if (col.type === "percentage") return "col-percentage";
+    if (col.type === "boolean" || col.type === "status" || col.type === "decision") return "col-center";
+    return "";
+  }, []);
+
+  return (
+    <div className="optimized-tender-table-container">
+      <div className="optimized-tender-table-toolbar">
+        <div className="toolbar-left">
+          <h2 className="table-title">{title}</h2>
+          <span className="record-count-badge">{totalRecords} Records Total</span>
+          <div className="global-search-container">
+            <span className="search-icon">🔍</span>
+            <input
+              type="text"
+              className="global-search-input"
+              placeholder="Search..."
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="toolbar-right">
+          <button className="export-btn" onClick={handleExportCSV}>
+            📥 Export CSV
+          </button>
+          <button className="export-btn" onClick={handleExportExcel}>
+            📊 Export Excel
+          </button>
+        </div>
+      </div>
+
+      <div className="optimized-tender-table-wrapper" ref={scrollContainerRef}>
+        <table className="optimized-tender-data-table">
+          <thead>
+            <tr>
+              <th style={{ width: "40px" }} className="col-center"></th>
+              {columns.map(col => (
+                <th
+                  key={String(col.accessor)}
+                  style={{ width: `${columnWidths[String(col.accessor)]}px` }}
+                >
+                  <div 
+                    className="header-content" 
+                    onClick={() => col.sortable !== false && handleSort(String(col.accessor))}
+                  >
+                    <span>{col.header}</span>
+                    {sortColumn === String(col.accessor) && (
+                      <span className="sort-indicator">
+                        {sortDirection === "asc" ? "▲" : "▼"}
+                      </span>
+                    )}
+                  </div>
+                  {renderFilter(col)}
+                  {col.resizable !== false && (
+                    <div
+                      className="column-resizer"
+                      onMouseDown={(e) => handleResizeStart(e, String(col.accessor), columnWidths[String(col.accessor)])}
+                    />
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {paginatedRows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length + 1} style={{ textAlign: "center", padding: "40px", color: "rgba(0,0,0,0.4)" }}>
+                  No matching records found.
+                </td>
+              </tr>
+            ) : (
+              paginatedRows.map((row) => {
+                const rowKeyValue = getRowKey(row);
+                const isExpanded = !!expandedRows[rowKeyValue];
+                
+                return (
+                  <React.Fragment key={rowKeyValue}>
+                    <tr className={`tender-row ${isExpanded ? "expanded-row" : ""}`}>
+                      <td className="col-center">
+                        {columns.some(c => c.renderExpanded) && (
+                          <button 
+                            className="details-link"
+                            onClick={() => toggleRowExpansion(rowKeyValue)}
+                          >
+                            {isExpanded ? "▼" : "▶"}
+                          </button>
+                        )}
+                      </td>
+                      
+                      {columns.map(col => {
+                        const cellClass = getColumnAlignClass(col);
+                        const cellContent = renderCell(col, row);
+
+                        return (
+                          <td 
+                            key={String(col.accessor)}
+                            className={cellClass}
+                            style={{ width: `${columnWidths[String(col.accessor)]}px` }}
+                            onClick={() => onRowClick?.(row)}
+                          >
+                            {cellContent}
+                          </td>
+                        );
+                      })}
+                    </tr>
+
+                    {isExpanded && columns.some(c => c.renderExpanded) && (
+                      <tr className="details-panel-row">
+                        <td colSpan={columns.length + 1}>
+                          <div className="details-panel-content">
+                            <div className="details-grid">
+                              {columns.filter(c => c.renderExpanded).map(col => (
+                                <div key={String(col.accessor)} className="details-item span-full">
+                                  <span className="details-label">{col.header}</span>
+                                  <span className="details-value">
+                                    {col.renderExpanded ? col.renderExpanded(row) : "-"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="optimized-tender-table-footer">
+        <div className="footer-left">
+          <span>Rows per page:</span>
+          <select
+            className="rows-per-page-select"
+            value={rowsPerPage}
+            onChange={(e) => {
+              setRowsPerPage(Number(e.target.value));
+              setCurrentPage(1);
+            }}
+          >
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </div>
+
+        <div className="footer-center">
+          Showing {totalRecords > 0 ? (activePage - 1) * rowsPerPage + 1 : 0} -{" "}
+          {Math.min(activePage * rowsPerPage, totalRecords)} of {totalRecords}
+        </div>
+
+        <div className="footer-right">
+          <button
+            className="page-btn"
+            onClick={() => setCurrentPage(1)}
+            disabled={activePage === 1}
+          >
+            FIRST
+          </button>
+          <button
+            className="page-btn"
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            disabled={activePage === 1}
+          >
+            PREV
+          </button>
+          
+          {Array.from({ length: Math.min(5, totalPages) }, (_, idx) => {
+            let pageNum = idx + 1;
+            if (totalPages > 5 && activePage > 3) {
+              pageNum = activePage - 3 + idx;
+              if (pageNum + (4 - idx) > totalPages) {
+                pageNum = totalPages - 4 + idx;
+              }
+            }
+            return (
+              <button
+                key={pageNum}
+                className={`page-btn ${activePage === pageNum ? "active" : ""}`}
+                onClick={() => setCurrentPage(pageNum)}
+              >
+                {pageNum}
+              </button>
+            );
+          })}
+
+          {totalPages > 5 && activePage < totalPages - 2 && (
+            <>
+              <span style={{ padding: "0 4px", color: "rgba(0,0,0,0.4)" }}>...</span>
+              <button
+                className={`page-btn ${activePage === totalPages ? "active" : ""}`}
+                onClick={() => setCurrentPage(totalPages)}
+              >
+                {totalPages}
+              </button>
+            </>
+          )}
+
+          <button
+            className="page-btn"
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            disabled={activePage === totalPages}
+          >
+            NEXT
+          </button>
+          <button
+            className="page-btn"
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={activePage === totalPages}
+          >
+            LAST
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
