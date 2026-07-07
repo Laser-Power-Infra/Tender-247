@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { fetchFiles } from "@/lib/slices/filesSlice";
 import { fetchTendersIncremental } from "@/lib/slices/tendersSlice";
@@ -18,6 +18,13 @@ export default function Dashboard() {
   const loadingTenders = useAppSelector((s) => s.tenders.loading);
   const totalFiles = useAppSelector((s) => s.tenders.totalFiles);
   const completedFiles = useAppSelector((s) => s.tenders.completedFiles);
+  const uploadResults = useAppSelector((s) => s.upload.results);
+
+  const refreshTenders = useCallback(() => {
+    if (files.length > 0) {
+      dispatch(fetchTendersIncremental(files.map((f) => f.id)));
+    }
+  }, [files, dispatch]);
 
   useEffect(() => {
     dispatch(fetchFiles({ from: new Date(selectedDateFrom), to: new Date(selectedDateTo) }));
@@ -30,6 +37,13 @@ export default function Dashboard() {
       dispatch(fetchTendersIncremental([]));
     }
   }, [files, dispatch]);
+
+  useEffect(() => {
+    if (uploadResults && uploadResults.length > 0) {
+      const fileIds = uploadResults.map((r) => r.fileId);
+      dispatch(fetchTendersIncremental(fileIds));
+    }
+  }, [uploadResults, dispatch]);
 
   return (
     <div className="flex flex-col flex-1 gap-6 p-6 lg:p-8">
@@ -45,11 +59,11 @@ export default function Dashboard() {
       <div>
         {loadingFiles && (
           <div className="flex items-center justify-center py-12 text-sm text-slate-400">
-            <svg
-              className="size-5 animate-spin mr-2 text-blue-500"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
+              <svg
+                className="size-5 animate-spin mr-2 text-primary"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
               <circle
                 className="opacity-25"
                 cx="12"
@@ -76,6 +90,7 @@ export default function Dashboard() {
             loadingTenders={loadingTenders}
             totalFiles={totalFiles}
             completedFiles={completedFiles}
+            onRefresh={refreshTenders}
           />
         )}
 

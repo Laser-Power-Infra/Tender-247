@@ -25,7 +25,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useAppDispatch, useAppSelector } from "@/lib/hooks";
+import {
+  setDeadlinePreset,
+  setDeadlineDateRange,
+  clearDeadlineFilter,
+  setGlobalFilter,
+  setSorting,
+  setColumnVisibility,
+  setColumnSizing,
+  toggleFilterTray,
+} from "@/lib/slices/filtersSlice";
 import { analyzeTenderValidity, saveAiRelevance } from "@/actions/ai-analysis";
+import * as XLSX from "xlsx";
 import {
   Loader2,
   Zap,
@@ -39,7 +51,19 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ListFilter,
+  SlidersHorizontal,
 } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  startOfYear,
+  endOfYear,
+} from "date-fns";
+import FilterTray from "./filter-tray";
 
 interface TenderTableProps {
   columns: string[];
@@ -48,6 +72,7 @@ interface TenderTableProps {
   loadingTenders?: boolean;
   totalFiles?: number;
   completedFiles?: number;
+  onRefresh?: () => void;
 }
 
 function formatHeader(col: string): string {
@@ -64,11 +89,16 @@ const ALWAYS_VISIBLE = new Set(["type", "referenceNo"]);
 
 const PAGE_SIZES = [20, 50, 100];
 
-function SortIndicator({ header }: { header: Header<Record<string, string>, unknown> }) {
+function SortIndicator({
+  header,
+}: {
+  header: Header<Record<string, string>, unknown>;
+}) {
   const sorted = header.column.getIsSorted();
   if (sorted === "asc") return <ChevronUp className="size-3" />;
   if (sorted === "desc") return <ChevronDown className="size-3" />;
-  if (header.column.getCanSort()) return <ChevronsUpDown className="size-3 text-white/30" />;
+  if (header.column.getCanSort())
+    return <ChevronsUpDown className="size-3 text-white/30" />;
   return null;
 }
 
@@ -79,6 +109,7 @@ export default function TenderTable({
   loadingTenders,
   totalFiles,
   completedFiles,
+  onRefresh,
 }: TenderTableProps) {
   const [analysisResults, setAnalysisResults] = useState<
     Record<number, { valid: boolean; reason: string }>
@@ -87,12 +118,77 @@ export default function TenderTable({
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const abortRef = useRef(false);
 
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [globalFilter, setGlobalFilter] = useState("");
-  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>({});
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const dispatch = useAppDispatch();
+  const sorting = useAppSelector((s) => s.filters.sorting);
+  const globalFilter = useAppSelector((s) => s.filters.globalFilter);
+  const columnSizing = useAppSelector((s) => s.filters.columnSizing);
+  const columnVisibility = useAppSelector((s) => s.filters.columnVisibility);
+  const exclusionFilter = useAppSelector((s) => s.filters.exclusionFilter);
+  const deadlinePreset = useAppSelector((s) => s.filters.deadlinePreset);
+  const deadlineDateFrom = useAppSelector((s) => s.filters.deadlineDateFrom);
+  const deadlineDateTo = useAppSelector((s) => s.filters.deadlineDateTo);
+  const typeFilter = useAppSelector((s) => s.filters.typeFilter);
+  const aiRelevanceFilter = useAppSelector((s) => s.filters.aiRelevanceFilter);
+  const showFilterTray = useAppSelector((s) => s.filters.showFilterTray);
+
+  const sortingRef = useRef(sorting);
+  sortingRef.current = sorting;
+  const globalFilterRef = useRef(globalFilter);
+  globalFilterRef.current = globalFilter;
+  const columnSizingRef = useRef(columnSizing);
+  columnSizingRef.current = columnSizing;
+  const columnVisibilityRef = useRef(columnVisibility);
+  columnVisibilityRef.current = columnVisibility;
+
+  const handleSortingChange = useCallback(
+    (updater: any) =>
+      dispatch(
+        setSorting(
+          typeof updater === "function" ? updater(sortingRef.current) : updater,
+        ),
+      ),
+    [dispatch],
+  );
+  const handleGlobalFilterChange = useCallback(
+    (updater: any) =>
+      dispatch(
+        setGlobalFilter(
+          typeof updater === "function"
+            ? updater(globalFilterRef.current)
+            : updater,
+        ),
+      ),
+    [dispatch],
+  );
+  const handleColumnSizingChange = useCallback(
+    (updater: any) =>
+      dispatch(
+        setColumnSizing(
+          typeof updater === "function"
+            ? updater(columnSizingRef.current)
+            : updater,
+        ),
+      ),
+    [dispatch],
+  );
+  const handleColumnVisibilityChange = useCallback(
+    (updater: any) =>
+      dispatch(
+        setColumnVisibility(
+          typeof updater === "function"
+            ? updater(columnVisibilityRef.current)
+            : updater,
+        ),
+      ),
+    [dispatch],
+  );
+
   const [showColumnPicker, setShowColumnPicker] = useState(false);
-  const [exclusionFilter, setExclusionFilter] = useState<"cable" | "conductors" | "both" | null>(null);
+  const [showDeadlinePicker, setShowDeadlinePicker] = useState(false);
+  const [deadlinePickerPos, setDeadlinePickerPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
 
   const dbResults = useMemo(() => {
     const map: Record<number, { valid: boolean; reason: string }> = {};
@@ -106,7 +202,10 @@ export default function TenderTable({
     return map;
   }, [rows]);
 
-  const hasDbResults = useMemo(() => Object.keys(dbResults).length > 0, [dbResults]);
+  const hasDbResults = useMemo(
+    () => Object.keys(dbResults).length > 0,
+    [dbResults],
+  );
 
   const combinedResults = useMemo(
     () => ({ ...dbResults, ...analysisResults }),
@@ -114,21 +213,96 @@ export default function TenderTable({
   );
 
   const resultsCount = Object.keys(combinedResults).length;
-  const validCount = Object.values(combinedResults).filter((r) => r.valid).length;
+  const validCount = Object.values(combinedResults).filter(
+    (r) => r.valid,
+  ).length;
 
   const showAiColumn = isAnalyzing || hasDbResults || resultsCount > 0;
 
   const tableData = useMemo(() => {
-    let filtered = rows;
-    if (exclusionFilter === "cable") {
-      filtered = rows.filter((r) => r.excludedCategory?.includes("cable"));
-    } else if (exclusionFilter === "conductors") {
-      filtered = rows.filter((r) => r.excludedCategory?.includes("conductors"));
-    } else if (exclusionFilter === "both") {
-      filtered = rows.filter((r) => r.excludedCategory === "cable,conductors");
+    let from: Date | null = null;
+    let to: Date | null = null;
+    const now = new Date();
+
+    if (deadlinePreset === "thisWeek") {
+      from = startOfWeek(now, { weekStartsOn: 1 });
+      to = endOfWeek(now, { weekStartsOn: 1 });
+    } else if (deadlinePreset === "thisMonth") {
+      from = startOfMonth(now);
+      to = endOfMonth(now);
+    } else if (deadlinePreset === "thisYear") {
+      from = startOfYear(now);
+      to = endOfYear(now);
+    } else if (deadlineDateFrom) {
+      from = new Date(deadlineDateFrom);
+      to = deadlineDateTo ? new Date(deadlineDateTo) : null;
     }
-    return filtered.map((row, i) => ({ ...row, _rowIndex: String(i) }));
-  }, [rows, exclusionFilter]);
+
+    let filtered = rows.map((row, i) => ({ row, _originalIndex: i }));
+
+    if (from || to) {
+      const toEnd = to
+        ? new Date(
+            to.getFullYear(),
+            to.getMonth(),
+            to.getDate(),
+            23,
+            59,
+            59,
+            999,
+          )
+        : null;
+      filtered = filtered.filter(({ row }) => {
+        if (!row.deadline) return false;
+        const d = new Date(row.deadline);
+        if (from && d < from) return false;
+        if (toEnd && d > toEnd) return false;
+        return true;
+      });
+    }
+
+    if (exclusionFilter) {
+      filtered = filtered.filter(({ row }) => {
+        const cat = row.excludedCategory;
+        if (!cat) return true;
+        if (exclusionFilter === "cable" && cat.includes("cable")) return false;
+        if (exclusionFilter === "conductors" && cat.includes("conductors"))
+          return false;
+        if (
+          exclusionFilter === "both" &&
+          (cat.includes("cable") || cat.includes("conductors"))
+        )
+          return false;
+        return true;
+      });
+    }
+
+    if (typeFilter !== "all") {
+      filtered = filtered.filter(({ row }) => row.type === typeFilter);
+    }
+
+    if (aiRelevanceFilter !== "all") {
+      filtered = filtered.filter(({ _originalIndex }) => {
+        const result = combinedResults[_originalIndex];
+        if (!result) return false;
+        return aiRelevanceFilter === "yes" ? result.valid : !result.valid;
+      });
+    }
+
+    return filtered.map(({ row, _originalIndex }) => ({
+      ...row,
+      _rowIndex: String(_originalIndex),
+    }));
+  }, [
+    rows,
+    exclusionFilter,
+    deadlinePreset,
+    deadlineDateFrom,
+    deadlineDateTo,
+    typeFilter,
+    aiRelevanceFilter,
+    combinedResults,
+  ]);
 
   const columnDefs = useMemo<ColumnDef<Record<string, string>>[]>(() => {
     const defs: ColumnDef<Record<string, string>>[] = [];
@@ -143,10 +317,13 @@ export default function TenderTable({
         enableResizing: col !== "type",
         enableHiding: !ALWAYS_VISIBLE.has(col),
         size:
-          col === "type" ? 100 :
-          col === "referenceNo" ? 170 :
-          col === "id" ? 80 :
-          undefined,
+          col === "type"
+            ? 100
+            : col === "referenceNo"
+              ? 170
+              : col === "id"
+                ? 80
+                : undefined,
         cell: ({ getValue }) => {
           const val = getValue() as string | undefined;
 
@@ -157,7 +334,7 @@ export default function TenderTable({
                 className={cn(
                   "text-[10px] font-medium",
                   val === "Gem"
-                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                    ? "bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200"
                     : "bg-slate-100 text-slate-600 border-slate-200",
                 )}
               >
@@ -194,7 +371,7 @@ export default function TenderTable({
           if (skip) return <span className="text-slate-300">\u2014</span>;
           if (isCurrent)
             return (
-              <span className="flex items-center gap-1.5 text-blue-500">
+              <span className="flex items-center gap-1.5 text-primary/80">
                 <Loader2 className="size-3 animate-spin" />
                 <span className="text-[11px]">Analyzing...</span>
               </span>
@@ -208,8 +385,8 @@ export default function TenderTable({
                   className={cn(
                     "inline-flex w-fit text-[10px] font-medium",
                     result.valid
-                      ? "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                      : "bg-red-100 text-red-700 border-red-200 hover:bg-red-100",
+                      ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-50"
+                      : "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-100",
                   )}
                 >
                   {result.valid ? "YES" : "NO"}
@@ -225,7 +402,14 @@ export default function TenderTable({
     }
 
     return defs;
-  }, [columns, showAiColumn, analysisResults, dbResults, isAnalyzing, currentIndex]);
+  }, [
+    columns,
+    showAiColumn,
+    analysisResults,
+    dbResults,
+    isAnalyzing,
+    currentIndex,
+  ]);
 
   const table = useReactTable({
     data: tableData,
@@ -234,10 +418,10 @@ export default function TenderTable({
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-    onColumnSizingChange: setColumnSizing,
-    onColumnVisibilityChange: setColumnVisibility,
+    onSortingChange: handleSortingChange,
+    onGlobalFilterChange: handleGlobalFilterChange,
+    onColumnSizingChange: handleColumnSizingChange,
+    onColumnVisibilityChange: handleColumnVisibilityChange,
     state: {
       sorting,
       globalFilter,
@@ -257,6 +441,35 @@ export default function TenderTable({
   });
 
   const isResizing = !!table.getState().columnSizingInfo.isResizingColumn;
+
+  const exportToExcel = useCallback(() => {
+    const visibleColumns = table
+      .getVisibleLeafColumns()
+      .map((c) => c.id)
+      .filter((id) => id !== "_rowIndex");
+    const exportData = table.getPrePaginationRowModel().rows.map((row) => {
+      const obj: Record<string, string> = {};
+      for (const colId of visibleColumns) {
+        const label = formatHeader(colId);
+        let val = row.original[colId] ?? "";
+        if (colId === "AI relevance") {
+          const valid = row.original.aiRelevanceValid;
+          const reason = row.original.aiRelevanceReason;
+          val =
+            valid && reason
+              ? `${valid === "true" ? "Yes" : "No"} Reason:${reason}`
+              : "";
+        }
+        obj[label] = val.length > 32767 ? val.slice(0, 32767) : val;
+      }
+      return obj;
+    });
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tenders");
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `tenders-${date}.xlsx`);
+  }, [table]);
 
   const runAnalysis = useCallback(async () => {
     abortRef.current = false;
@@ -344,9 +557,12 @@ export default function TenderTable({
             </p>
             <p className="text-[11px]">
               {table.getPrePaginationRowModel().rows.length} tender
-              {table.getPrePaginationRowModel().rows.length !== 1 ? "s" : ""} found
+              {table.getPrePaginationRowModel().rows.length !== 1
+                ? "s"
+                : ""}{" "}
+              found
               {loadingTenders && totalFiles && completedFiles !== undefined && (
-                <span className="text-amber-500 ml-1.5">
+                <span className="text-blue-500 ml-1.5">
                   (loading {completedFiles}/{totalFiles})
                 </span>
               )}
@@ -359,28 +575,24 @@ export default function TenderTable({
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-slate-400 pointer-events-none" />
             <input
               value={globalFilter ?? ""}
-              onChange={(e) => setGlobalFilter(e.target.value)}
+              onChange={(e) => dispatch(setGlobalFilter(e.target.value))}
               placeholder="Search..."
               className="h-8 w-44 rounded-lg border border-input bg-transparent pl-7 pr-2.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />
           </div>
 
-          <div className="flex items-center gap-1">
-            {(["cable", "conductors", "both"] as const).map((key) => (
-              <Button
-                key={key}
-                size="xs"
-                variant={exclusionFilter === key ? "default" : "outline"}
-                onClick={() => setExclusionFilter(exclusionFilter === key ? null : key)}
-                className={cn(
-                  "text-xs capitalize",
-                  exclusionFilter === key && "bg-blue-600 hover:bg-blue-700",
-                )}
-              >
-                {key === "both" ? "Both" : key}
-              </Button>
-            ))}
-          </div>
+          <Button
+            size="xs"
+            variant={showFilterTray ? "default" : "outline"}
+            onClick={() => dispatch(toggleFilterTray())}
+            className={cn(
+              "text-xs",
+              showFilterTray && "bg-blue-100 text-blue-800 hover:bg-blue-200",
+            )}
+          >
+            <SlidersHorizontal className="size-3" />
+            Filters
+          </Button>
 
           <div className="relative">
             <Button
@@ -414,7 +626,7 @@ export default function TenderTable({
                           type="checkbox"
                           checked={column.getIsVisible()}
                           onChange={column.getToggleVisibilityHandler()}
-                          className="size-3.5 accent-blue-600"
+                          className="size-3.5 accent-primary"
                         />
                         {formatHeader(column.id)}
                       </label>
@@ -430,11 +642,11 @@ export default function TenderTable({
                 className={cn(
                   "text-[10px]",
                   validCount === resultsCount
-                    ? "bg-emerald-100 text-emerald-700 border-emerald-200"
-                    : "bg-amber-100 text-amber-700 border-amber-200",
+                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                    : "bg-blue-100 text-blue-800 border-blue-300",
                 )}
               >
-                {validCount}/{resultsCount} valid
+                {validCount} valid
               </Badge>
             )}
             <Badge className="bg-white/10 border-white/20 text-[10px] hover:bg-white/20 text-slate-600 border-slate-200">
@@ -455,23 +667,47 @@ export default function TenderTable({
                 Stop ({Object.keys(analysisResults).length}/{rows.length})
               </Button>
             )}
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={exportToExcel}
+              className="text-xs"
+            >
+              <svg
+                className="size-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+                />
+              </svg>
+              Export Excel
+            </Button>
           </div>
         </div>
       </div>
 
+      {showFilterTray && <FilterTray />}
+
+      {/* Outer: horizontal scroll on parent */}
       <div
-        className={cn("overflow-auto max-h-[65vh]", isResizing && "select-none")}
+        className={cn(
+          "overflow-auto max-h-[65vh]",
+          isResizing && "select-none",
+        )}
       >
         <Table
-          className="border-collapse w-full"
-          style={{ tableLayout: "fixed" }}
+          className="border-collapse"
+          style={{ tableLayout: "fixed", minWidth: "max-content" }}
         >
           <colgroup>
             {table.getAllLeafColumns().map((column) => (
-              <col
-                key={column.id}
-                style={{ width: column.getSize() }}
-              />
+              <col key={column.id} style={{ width: column.getSize() }} />
             ))}
           </colgroup>
           <TableHeader className="sticky top-0 z-20">
@@ -488,7 +724,8 @@ export default function TenderTable({
                         "px-3 py-2 text-left border-b border-r border-[#1a3a63] last:border-r-0",
                         "truncate relative group",
                         colId === "type" && "bg-[#0f2847]",
-                        header.column.getCanSort() && "cursor-pointer select-none",
+                        header.column.getCanSort() &&
+                          "cursor-pointer select-none",
                       )}
                       style={{
                         width: header.getSize(),
@@ -505,6 +742,29 @@ export default function TenderTable({
                         {header.column.getCanSort() && (
                           <SortIndicator header={header} />
                         )}
+                        {colId === "deadline" && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const rect = (
+                                e.currentTarget as HTMLElement
+                              ).getBoundingClientRect();
+                              setDeadlinePickerPos({
+                                top: rect.bottom + 4,
+                                left: Math.max(8, rect.left - 120),
+                              });
+                              setShowDeadlinePicker((v) => !v);
+                            }}
+                            className={cn(
+                              "size-3.5 flex items-center justify-center rounded cursor-pointer",
+                              deadlinePreset || deadlineDateFrom
+                                ? "text-primary/80"
+                                : "text-white/60 hover:text-white/80",
+                            )}
+                          >
+                            <ListFilter className="size-3" />
+                          </button>
+                        )}
                       </div>
 
                       {header.column.getCanResize() && (
@@ -514,7 +774,7 @@ export default function TenderTable({
                           onTouchStart={header.getResizeHandler()}
                           className={cn(
                             "absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize rounded-full",
-                            "group-hover:bg-blue-300/50 active:bg-blue-400/70",
+                            "group-hover:bg-primary/20 active:bg-primary/30",
                           )}
                         />
                       )}
@@ -572,10 +832,14 @@ export default function TenderTable({
       <div className="flex items-center justify-between px-5 py-2.5 border-t border-slate-200 bg-white">
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <span>
-            Showing {table.getState().pagination.pageIndex * table.getState().pagination.pageSize + 1}
-            {" "}\u2013{" "}
+            Showing{" "}
+            {table.getState().pagination.pageIndex *
+              table.getState().pagination.pageSize +
+              1}{" "}
+            \u2013{" "}
             {Math.min(
-              (table.getState().pagination.pageIndex + 1) * table.getState().pagination.pageSize,
+              (table.getState().pagination.pageIndex + 1) *
+                table.getState().pagination.pageSize,
               table.getPrePaginationRowModel().rows.length,
             )}{" "}
             of {table.getPrePaginationRowModel().rows.length}
@@ -636,6 +900,92 @@ export default function TenderTable({
           </Button>
         </div>
       </div>
+
+      {showDeadlinePicker && deadlinePickerPos && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => {
+              setShowDeadlinePicker(false);
+              setDeadlinePickerPos(null);
+            }}
+          />
+          <div
+            className="fixed z-50 rounded-lg bg-white shadow-md ring-1 ring-slate-200 p-3"
+            style={{ top: deadlinePickerPos.top, left: deadlinePickerPos.left }}
+          >
+            <p className="text-[11px] font-medium text-slate-500 mb-2 uppercase tracking-wider">
+              Quick Select
+            </p>
+            <div className="flex gap-1 mb-3">
+              {(["thisWeek", "thisMonth", "thisYear"] as const).map(
+                (preset) => (
+                  <Button
+                    key={preset}
+                    size="xs"
+                    variant={deadlinePreset === preset ? "default" : "outline"}
+                    onClick={() => {
+                      dispatch(
+                        setDeadlinePreset(
+                          deadlinePreset === preset ? null : preset,
+                        ),
+                      );
+                      setShowDeadlinePicker(false);
+                    }}
+                    className="flex-1 text-xs"
+                  >
+                    {preset === "thisWeek"
+                      ? "Week"
+                      : preset === "thisMonth"
+                        ? "Month"
+                        : "Year"}
+                  </Button>
+                ),
+              )}
+            </div>
+            <p className="text-[11px] font-medium text-slate-500 mb-2 uppercase tracking-wider">
+              Custom Range
+            </p>
+            <Calendar
+              mode="range"
+              defaultMonth={new Date()}
+              selected={
+                deadlineDateFrom
+                  ? {
+                      from: new Date(deadlineDateFrom),
+                      to: deadlineDateTo ? new Date(deadlineDateTo) : undefined,
+                    }
+                  : undefined
+              }
+              onSelect={(range) => {
+                if (range?.from && range?.to) {
+                  dispatch(
+                    setDeadlineDateRange({
+                      from: range.from.toISOString(),
+                      to: range.to.toISOString(),
+                    }),
+                  );
+                }
+              }}
+              numberOfMonths={2}
+            />
+            {(deadlinePreset || deadlineDateFrom) && (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => {
+                  dispatch(clearDeadlineFilter());
+                  setDeadlinePickerPos(null);
+                  setShowDeadlinePicker(false);
+                }}
+                className="mt-2 w-full text-xs"
+              >
+                Clear Filter
+              </Button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

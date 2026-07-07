@@ -25,15 +25,15 @@ export default function ActionArea() {
 
   return (
     <div className="h-full flex flex-col rounded-xl bg-white border border-slate-200 shadow-sm overflow-hidden">
-      <div className="bg-gradient-to-r from-[#0a1e3d] to-[#13305f] px-5 py-3.5 flex items-center gap-2.5">
+      <div className="bg-gradient-to-r from-primary to-primary/80 px-5 py-3.5 flex items-center gap-2.5">
         <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-white/10">
-          <Eye className="size-3.5 text-blue-200" />
+          <Eye className="size-3.5 text-primary-foreground/80" />
         </div>
         <div>
           <h3 className="text-sm font-semibold text-white tracking-wide">
             View Tenders
           </h3>
-          <p className="text-[11px] text-blue-200/70">
+          <p className="text-[11px] text-primary-foreground/60">
             Select date range to view parsed data
           </p>
         </div>

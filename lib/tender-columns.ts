@@ -14,12 +14,18 @@ const GEM_FIELDS = new Set([
   "ePbgPercentage", "ePbgDurationMonths", "msePurchasePreference",
   "miiPurchasePreference", "consigneesReportingOfficer",
   "mediationClause", "arbitrationClause", "checklist",
+  "t247Id", "scrapedDate", "source", "assignedTo",
+  "markedStatus", "sheetStatus", "ready", "searchKey",
+  "downloadLink", "currency",
 ]);
 
 const NON_GEM_FIELDS = new Set([
-  "referenceNo", "tenderBrief", "estimatedCost", "deadline",
+  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline",
   "location", "organization", "documentFees", "emd",
   "msmeExemption", "startupExemption", "quantity", "checklist",
+  "t247Id", "scrapedDate", "source", "assignedTo",
+  "markedStatus", "sheetStatus", "ready", "searchKey",
+  "downloadLink", "currency",
 ]);
 
 type ColumnMap = Record<string, string>;
@@ -31,18 +37,23 @@ const COLUMN_MAP: ColumnMap = {
   tenderReferenceNo: "referenceNo",
   refNo: "referenceNo",
   ref: "referenceNo",
+  deptTenderNumber: "referenceNo",
+  deptTender: "referenceNo",
 
   tenderBrief: "tenderBrief",
   brief: "tenderBrief",
   tenderDescription: "tenderBrief",
   description: "tenderBrief",
   tenderDetails: "tenderBrief",
+  workDescription: "tenderBrief",
+  itemName: "tenderBrief",
 
   value: "value",
   tenderValue: "value",
   estimatedValue: "value",
+  tenderValueInRs: "value",
 
-  estimatedCost: "estimatedCost",
+  estimatedCost: "estimatedBidValue",
 
   deadline: "deadline",
   bidDeadline: "deadline",
@@ -51,6 +62,7 @@ const COLUMN_MAP: ColumnMap = {
   lastDate: "deadline",
   bidEndDate: "deadline",
   submissionDeadline: "deadline",
+  bidSubmissionEndDate: "deadline",
 
   location: "location",
   placeOfWork: "location",
@@ -58,12 +70,15 @@ const COLUMN_MAP: ColumnMap = {
   region: "location",
   state: "location",
   city: "location",
+  address: "location",
+  country: "location",
 
   organization: "organization",
   procuringEntity: "organization",
   buyer: "organization",
   department: "organization",
   organisation: "organization",
+  tenderAuthority: "organization",
   departmentName: "departmentName",
   officeName: "officeName",
   ministryStateName: "ministryStateName",
@@ -72,6 +87,7 @@ const COLUMN_MAP: ColumnMap = {
   docFees: "documentFees",
   tenderFee: "documentFees",
   costOfDocument: "documentFees",
+  tenderDocumentFees: "documentFees",
 
   emd: "emd",
   earnestMoney: "emd",
@@ -79,22 +95,28 @@ const COLUMN_MAP: ColumnMap = {
   earnestMoneyDeposit: "emd",
 
   quantity: "quantity",
+  size: "quantity",
 
   msmeExemption: "msmeExemption",
   startupExemption: "startupExemption",
 
   checklist: "checklist",
+  requirementChecklist: "checklist",
 
   bidOpeningDateTime: "bidOpeningDateTime",
   bidOpeningDate: "bidOpeningDateTime",
+  "Bid Opening Date/Time": "bidOpeningDateTime",
   bidOfferValidity: "bidOfferValidity",
+  "Bid Offer Validity (From End Date)": "bidOfferValidity",
 
   minimumAverageAnnualTurnover: "minimumAverageAnnualTurnover",
   avgAnnualTurnover: "minimumAverageAnnualTurnover",
   averageTurnover: "minimumAverageAnnualTurnover",
+  "Minimum Average Annual Turnover of the bidder": "minimumAverageAnnualTurnover",
 
   yearsOfPastExperience: "yearsOfPastExperience",
   pastExperience: "yearsOfPastExperience",
+  "Years of Past Experience Required for same/similar service": "yearsOfPastExperience",
 
   oemAverageTurnover: "oemAverageTurnover",
   oemTurnover: "oemAverageTurnover",
@@ -112,6 +134,7 @@ const COLUMN_MAP: ColumnMap = {
   bidDetails: "bidDetails",
 
   estimatedBidValue: "estimatedBidValue",
+  tenderAmount: "estimatedBidValue",
 
   evaluationMethod: "evaluationMethod",
 
@@ -126,6 +149,7 @@ const COLUMN_MAP: ColumnMap = {
   epbgDuration: "ePbgDurationMonths",
 
   inspectionRequired: "inspectionRequired",
+  "Inspection Required (By Empanelled Inspection Authority / Agencies pre registered with GeM)": "inspectionRequired",
 
   pastPerformance: "pastPerformance",
 
@@ -150,12 +174,40 @@ const COLUMN_MAP: ColumnMap = {
   maintenanceCharges: "comprehensiveMaintenanceChargesRequired",
 
   technicalClarificationTimeAllowed: "technicalClarificationTimeAllowed",
+  "Time allowed for Technical Clarifications during technical evaluation": "technicalClarificationTimeAllowed",
 
   financialDocumentPriceBreakupRequired: "financialDocumentPriceBreakupRequired",
   priceBreakupRequired: "financialDocumentPriceBreakupRequired",
+  "Financial Document Indicating Price Breakup Required": "financialDocumentPriceBreakupRequired",
   documentRequiredFromSeller: "documentRequiredFromSeller",
 
   pastExperienceSimilarServicesRequired: "pastExperienceSimilarServicesRequired",
+  "Past Experience of Similar Services": "pastExperienceSimilarServicesRequired",
+
+  t247Id: "t247Id",
+  tenderId: "t247Id",
+  tidNo: "t247Id",
+
+  scrapedDate: "scrapedDate",
+  publicationDate: "scrapedDate",
+
+  source: "source",
+  originalSource: "source",
+
+  assignedTo: "assignedTo",
+
+  markedStatus: "markedStatus",
+
+  sheetStatus: "sheetStatus",
+
+  ready: "ready",
+
+  searchKey: "searchKey",
+  tenderClassifiedIn: "searchKey",
+
+  downloadLink: "downloadLink",
+
+  currency: "currency",
 };
 
 const NORMALIZED_COLUMN_MAP: ColumnMap = (() => {

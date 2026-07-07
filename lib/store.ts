@@ -2,6 +2,7 @@ import { configureStore } from "@reduxjs/toolkit";
 import filesReducer from "@/lib/slices/filesSlice";
 import tendersReducer from "@/lib/slices/tendersSlice";
 import uploadReducer from "@/lib/slices/uploadSlice";
+import filtersReducer from "@/lib/slices/filtersSlice";
 
 export const makeStore = () =>
   configureStore({
@@ -9,7 +10,14 @@ export const makeStore = () =>
       files: filesReducer,
       tenders: tendersReducer,
       upload: uploadReducer,
+      filters: filtersReducer,
     },
+    middleware: (getDefaultMiddleware) =>
+      getDefaultMiddleware({
+        serializableCheck: {
+          ignoredPaths: ["upload.pendingFiles"],
+        },
+      }),
   });
 
 export type AppStore = ReturnType<typeof makeStore>;

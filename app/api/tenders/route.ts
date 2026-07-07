@@ -23,12 +23,18 @@ const GEM_DISPLAY_FIELDS = [
   "ePbgPercentage", "ePbgDurationMonths", "msePurchasePreference",
   "miiPurchasePreference", "consigneesReportingOfficer",
   "mediationClause", "arbitrationClause", "checklist",
+  "t247Id", "scrapedDate", "source", "assignedTo",
+  "markedStatus", "sheetStatus", "ready", "searchKey",
+  "downloadLink", "currency",
 ] as const;
 
 const NON_GEM_DISPLAY_FIELDS = [
-  "referenceNo", "tenderBrief", "estimatedCost", "deadline",
+  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline",
   "location", "organization", "documentFees", "emd",
   "msmeExemption", "startupExemption", "quantity", "checklist",
+  "t247Id", "scrapedDate", "source", "assignedTo",
+  "markedStatus", "sheetStatus", "ready", "searchKey",
+  "downloadLink", "currency",
 ] as const;
 
 const ALL_KNOWN_FIELDS = [
@@ -38,6 +44,7 @@ const ALL_KNOWN_FIELDS = [
     "aiRelevanceValid",
     "aiRelevanceReason",
     "excludedCategory",
+    "tenderFileUrl",
   ]),
 ];
 

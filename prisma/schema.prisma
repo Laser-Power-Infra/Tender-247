@@ -99,10 +99,23 @@ model GemTender {
 
   checklist String?
 
+  t247Id String?
+  scrapedDate String?
+  source String?
+  assignedTo String?
+  markedStatus String?
+  sheetStatus String?
+  ready String?
+  searchKey String?
+  downloadLink String?
+  currency String?
+
   excludedCategory String?
 
   aiRelevanceValid   Boolean?
   aiRelevanceReason  String?
+
+  tenderFileUrl String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -123,7 +136,7 @@ model NonGemTender {
   referenceNo String @unique
   tenderBrief String?
 
-  estimatedCost String?
+  estimatedBidValue String?
   deadline DateTime?
   location String?
   organization String?
@@ -138,10 +151,23 @@ model NonGemTender {
 
   checklist String?
 
+  t247Id String?
+  scrapedDate String?
+  source String?
+  assignedTo String?
+  markedStatus String?
+  sheetStatus String?
+  ready String?
+  searchKey String?
+  downloadLink String?
+  currency String?
+
   excludedCategory String?
 
   aiRelevanceValid   Boolean?
   aiRelevanceReason  String?
+
+  tenderFileUrl String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
