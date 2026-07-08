@@ -10,6 +10,7 @@ interface SelectColumnFilterProps {
   className?: string;
   selectClassName?: string;
   searchable?: boolean;
+  onSearchChange?: (text: string) => void;
 }
 
 export const SelectColumnFilter: React.FC<SelectColumnFilterProps> = ({
@@ -20,6 +21,7 @@ export const SelectColumnFilter: React.FC<SelectColumnFilterProps> = ({
   className = "column-status-filter",
   selectClassName = "status-filter-select",
   searchable = false,
+  onSearchChange,
 }) => {
   const [search, setSearch] = useState("");
 
@@ -47,13 +49,21 @@ export const SelectColumnFilter: React.FC<SelectColumnFilterProps> = ({
           className="text-filter-input"
           placeholder="Search..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            const text = e.target.value;
+            setSearch(text);
+            onSearchChange?.(text);
+          }}
         />
       )}
       <select
         className={selectClassName}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          setSearch("");
+          onSearchChange?.("");
+          onChange(e.target.value);
+        }}
         style={searchable ? { width: "100%" } : undefined}
       >
         <option value="">{placeholder}</option>

@@ -96,6 +96,7 @@ function formatHeader(col: string): string {
   if (col === "AI relevance") return "AI RELEVANCE";
   if (col === "type") return "Type";
   if (col === "id") return "ID";
+  if (col.toLowerCase() === "t247id") return "Portal ID";
   return col
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (s) => s.toUpperCase())
@@ -409,6 +410,7 @@ export default function TenderTable({
     if (aiRelevanceFilter !== "all") {
       filtered = filtered.filter(({ _originalIndex }) => {
         const result = combinedResults[_originalIndex];
+        if (aiRelevanceFilter === "not_analysed") return !result;
         if (!result) return false;
         return aiRelevanceFilter === "yes" ? result.valid : !result.valid;
       });

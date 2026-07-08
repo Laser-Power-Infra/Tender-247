@@ -39,6 +39,7 @@ const COLUMN_MAP: ColumnMap = {
   ref: "referenceNo",
   deptTenderNumber: "referenceNo",
   deptTender: "referenceNo",
+  tenderId: "referenceNo",
 
   tenderBrief: "tenderBrief",
   brief: "tenderBrief",
@@ -185,7 +186,6 @@ const COLUMN_MAP: ColumnMap = {
   "Past Experience of Similar Services": "pastExperienceSimilarServicesRequired",
 
   t247Id: "t247Id",
-  tenderId: "t247Id",
   tidNo: "t247Id",
 
   scrapedDate: "scrapedDate",
@@ -315,6 +315,7 @@ function findReferenceNoColumn(
     }
     const n = normalizeHeader(h);
     if (n.includes("ref") && n.includes("no")) return h;
+    if (n === "tenderid" || n === "tid") return h;
   }
   return undefined;
 }

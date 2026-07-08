@@ -7,10 +7,12 @@ import {
   SelectColumnFilter,
   TextColumnFilter,
   BooleanColumnFilter,
+  DeadlineColumnFilter,
 } from "./filters";
-import { format } from "date-fns";
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from "date-fns";
+import * as XLSX from "xlsx";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
-import { setColumnFilter, clearColumnFilter as clearColumnFilterAction } from "@/lib/slices/filtersSlice";
+import { setColumnFilter, clearColumnFilter as clearColumnFilterAction, setColumnVisibility, resetColumnFilters } from "@/lib/slices/filtersSlice";
 import type {
   ColumnFilterType,
   FilterOption,
@@ -29,6 +31,8 @@ export interface ColumnDef<T> {
   filter?: ColumnFilterConfig;
   sortable?: boolean;
   resizable?: boolean;
+  searchable?: boolean;
+  hidden?: boolean;
   renderCell?: (value: unknown, row: T) => React.ReactNode;
   renderExpanded?: (row: T) => React.ReactNode;
 }
@@ -39,6 +43,9 @@ export interface OptimizedTenderTableProps<T extends Record<string, unknown>> {
   title?: string;
   rowKey?: keyof T;
   onRowClick?: (row: T) => void;
+  associations?: { id: number; name: string; email: string }[];
+  extraToolbarActions?: React.ReactNode;
+  onFilteredRowsChange?: (rows: T[]) => void;
 }
 
 export function OptimizedTenderTable<T extends Record<string, unknown>>({
@@ -47,6 +54,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   title = "Data Table",
   rowKey = "id" as keyof T,
   onRowClick,
+  associations = [],
+  extraToolbarActions,
+  onFilteredRowsChange,
 }: OptimizedTenderTableProps<T>) {
   const [globalSearch, setGlobalSearch] = useState<string>("");
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -64,9 +74,11 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
   });
 
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
-  
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
+
   const dispatch = useAppDispatch();
   const columnFilters = useAppSelector((s) => s.filters.columnFilters);
+  const columnVisibility = useAppSelector((s) => s.filters.columnVisibility);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -126,13 +138,15 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     const type = row["type" as keyof T];
     const id = row[rowKey];
     if (id !== undefined) {
-      return type !== undefined ? `${String(type)}-${String(id)}` : String(id);
+      const base = type !== undefined ? `${String(type)}-${String(id)}` : String(id);
+      const ki = (row as any)._keyIndex;
+      return ki !== undefined ? `${base}-${ki}` : base;
     }
     return Math.random().toString();
   }, [rowKey]);
 
   const processedRows = useMemo(() => {
-    let result = [...rows];
+    let result = rows.map((row, idx) => ({ ...row, _keyIndex: idx } as unknown as T));
 
     if (globalSearch.trim() !== "") {
       const searchLower = globalSearch.toLowerCase().trim();
@@ -150,6 +164,38 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
       const accessorStr = String(col.accessor);
       const filterState = columnFilters[accessorStr];
       if (!filterState) return;
+
+      if (accessorStr === "deadline" && filterState.select) {
+        const now = new Date();
+        let from: Date | null = null;
+        let to: Date | null = null;
+        const preset = filterState.select;
+        if (preset === "thisWeek") {
+          from = startOfWeek(now, { weekStartsOn: 1 });
+          to = endOfWeek(now, { weekStartsOn: 1 });
+        } else if (preset === "thisMonth") {
+          from = startOfMonth(now);
+          to = endOfMonth(now);
+        } else if (preset === "thisYear") {
+          from = startOfYear(now);
+          to = endOfYear(now);
+        }
+        if (from) {
+          const toEnd = to
+            ? new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999)
+            : null;
+          result = result.filter(row => {
+            const val = row[col.accessor as keyof T];
+            if (!(val instanceof Date) && typeof val !== "string" && typeof val !== "number") return true;
+            const dateVal = val instanceof Date ? val : new Date(String(val));
+            if (isNaN(dateVal.getTime())) return true;
+            if (dateVal < from) return false;
+            if (toEnd && dateVal > toEnd) return false;
+            return true;
+          });
+        }
+        return;
+      }
 
       if (col.filter?.type === "dateRange" && filterState.dateRange) {
         const { startDate, endDate } = filterState.dateRange;
@@ -178,14 +224,31 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
         }
       }
 
-      if (col.filter?.type === "select" && filterState.select) {
-        result = result.filter(row => {
-          const val = row[col.accessor as keyof T];
-          return String(val) === filterState.select;
-        });
+      if (col.filter?.type === "select") {
+        const selectVal = filterState.select;
+        if (selectVal) {
+          result = result.filter(row => {
+            const val = String(row[col.accessor as keyof T] ?? "");
+            if (accessorStr === "assignedTo") {
+              return val.split(",").map(s => s.trim()).includes(selectVal);
+            }
+            if (selectVal === "not_analysed") {
+              return val === "";
+            }
+            return val === selectVal;
+          });
+        }
+        if (col.filter.searchable && filterState.text) {
+          const textLower = filterState.text.toLowerCase();
+          result = result.filter(row => {
+            const val = row[col.accessor as keyof T];
+            if (val === null || val === undefined) return false;
+            return String(val).toLowerCase().includes(textLower);
+          });
+        }
       }
 
-      if (col.filter?.type === "text" && filterState.text) {
+      if (filterState.text) {
         const textLower = filterState.text.toLowerCase();
         result = result.filter(row => {
           const val = row[col.accessor as keyof T];
@@ -197,6 +260,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
       if (col.filter?.type === "boolean" && filterState.boolean !== null && filterState.boolean !== undefined) {
         result = result.filter(row => {
           const val = row[col.accessor as keyof T];
+          if (typeof val === "string") {
+            return (val === "true") === filterState.boolean;
+          }
           return Boolean(val) === filterState.boolean;
         });
       }
@@ -226,6 +292,20 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
       });
     }
 
+    const hasDeadlineFilter = columnFilters["deadline"]?.select || columnFilters["deadline"]?.dateRange;
+    if (!hasDeadlineFilter) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      result = result.filter(row => {
+        const val = row["deadline" as keyof T];
+        if (val == null || val === "") return true;
+        if (!(val instanceof Date) && typeof val !== "string" && typeof val !== "number") return true;
+        const dateVal = val instanceof Date ? val : new Date(String(val));
+        if (isNaN(dateVal.getTime())) return true;
+        return dateVal >= today;
+      });
+    }
+
     return result;
   }, [rows, globalSearch, sortColumn, sortDirection, columns, columnFilters]);
 
@@ -239,91 +319,53 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     return processedRows.slice(startIndex, startIndex + rowsPerPage);
   }, [processedRows, activePage, rowsPerPage]);
 
+  const visibleColumns = useMemo(
+    () => columns.filter((col) => !col.hidden && columnVisibility[String(col.accessor)] !== false),
+    [columns, columnVisibility],
+  );
+
   useEffect(() => {
     setCurrentPage(1);
   }, [globalSearch, rowsPerPage, columnFilters]);
 
-  const getCSVData = useCallback(() => {
-    const headers = columns.map(c => c.header).join(",");
-    const rowsData = processedRows.map(row => {
-      return columns.map(col => {
-        let val: unknown = row[col.accessor as keyof T];
-        if (val === null || val === undefined) return "";
-        if (val instanceof Date) return val.toLocaleDateString("en-GB");
-        
-        let strVal = String(val);
-        if (strVal.includes(",") || strVal.includes('"') || strVal.includes("\n")) {
-          strVal = `"${strVal.replace(/"/g, '""')}"`;
-        }
-        return strVal;
-      }).join(",");
-    });
-    return [headers, ...rowsData].join("\n");
-  }, [columns, processedRows]);
+  const onFilteredRowsChangeRef = useRef(onFilteredRowsChange);
+  onFilteredRowsChangeRef.current = onFilteredRowsChange;
 
-  const handleExportCSV = useCallback(() => {
-    const csvContent = getCSVData();
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${title.replace(/\s+/g, "_")}_Data_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [getCSVData, title]);
+  useEffect(() => {
+    onFilteredRowsChangeRef.current?.(processedRows);
+  }, [processedRows]);
 
   const handleExportExcel = useCallback(() => {
-    const tableHeader = columns.map(c => `<th style="background-color:#0a2540;color:#ffffff;font-weight:bold;">${c.header}</th>`).join("");
-    const tableRows = processedRows.map(row => {
-      const cells = columns.map(col => {
-        let val: unknown = row[col.accessor as keyof T];
-        if (val === null || val === undefined) return "<td></td>";
-        if (val instanceof Date) return `<td>${val.toLocaleDateString("en-GB")}</td>`;
-        if (col.type === "currency") return `<td style="text-align:right;">${val}</td>`;
-        if (col.type === "percentage") return `<td style="text-align:right;">${((val as number) * 100).toFixed(1)}%</td>`;
-        return `<td>${String(val)}</td>`;
-      }).join("");
-      return `<tr>${cells}</tr>`;
-    }).join("");
-
-    const excelHtml = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta http-equiv="Content-type" content="text/html;charset=utf-8" />
-        <![if gte o4 9]>
-        <xml>
-          <x:ExcelWorkbook>
-            <x:ExcelWorksheets>
-              <x:ExcelWorksheet>
-                <x:Name>Data</x:Name>
-                <x:WorksheetOptions>
-                  <x:DisplayGridlines/>
-                </x:WorksheetOptions>
-              </x:ExcelWorksheet>
-            </x:ExcelWorksheets>
-          </x:ExcelWorkbook>
-        </xml>
-        <![endif]>
-      </head>
-      <body>
-        <table border="1">
-          <thead><tr>${tableHeader}</tr></thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob([excelHtml], { type: "application/vnd.ms-excel" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${title.replace(/\s+/g, "_")}_Data_${new Date().toISOString().split('T')[0]}.xls`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [columns, processedRows, title]);
+    const visibleColumns = columns.filter((c) => !c.hidden && columnVisibility[String(c.accessor)] !== false);
+    const exportData = processedRows.map((row) => {
+      const obj: Record<string, string> = {};
+      for (const col of visibleColumns) {
+        const accessor = String(col.accessor);
+        const label = col.header;
+        let val = String(row[accessor as keyof T] ?? "");
+        if (accessor === "assignedTo") {
+          const ids = (val || "").split(",").filter(Boolean);
+          val = ids
+            .map((id) => {
+              const a = associations.find((assoc) => assoc.id === parseInt(id));
+              return a ? `${a.name}(${a.email})` : "";
+            })
+            .filter(Boolean)
+            .join("\n");
+        }
+        if (accessor === "app" || accessor === "aps" || accessor === "apm") {
+          val = val !== "YES" && val !== "NO" ? "" : val;
+        }
+        obj[label] = val.length > 32767 ? val.slice(0, 32767) : val;
+      }
+      return obj;
+    });
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tenders");
+    const date = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `tenders-${date}.xlsx`);
+  }, [columns, processedRows, associations, columnVisibility]);
 
   const formatCurrency = useCallback((val: number | null | undefined): string => {
     if (val === null || val === undefined) return "-";
@@ -359,6 +401,39 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
     
     if (!col.filter) return null;
 
+    if (accessorStr === "deadline") {
+      return (
+        <DeadlineColumnFilter
+          preset={filterState?.select ?? ""}
+          onPresetChange={(v) => {
+            if (v) {
+              dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "dateRange" }));
+              dispatch(setColumnFilter({ accessor: accessorStr, filterType: "select", value: v }));
+            } else {
+              dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "select" }));
+            }
+            setCurrentPage(1);
+          }}
+          startDate={filterState?.dateRange?.startDate ?? ""}
+          endDate={filterState?.dateRange?.endDate ?? ""}
+          onStartDateChange={(v) => {
+            dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "select" }));
+            dispatch(setColumnFilter({ accessor: accessorStr, filterType: "dateRange", value: { startDate: v, endDate: filterState?.dateRange?.endDate ?? "" } }));
+            setCurrentPage(1);
+          }}
+          onEndDateChange={(v) => {
+            dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "select" }));
+            dispatch(setColumnFilter({ accessor: accessorStr, filterType: "dateRange", value: { startDate: filterState?.dateRange?.startDate ?? "", endDate: v } }));
+            setCurrentPage(1);
+          }}
+          onClearDateRange={() => {
+            dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "dateRange" }));
+            setCurrentPage(1);
+          }}
+        />
+      );
+    }
+
     switch (col.filter.type) {
       case "dateRange":
         return (
@@ -374,10 +449,24 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
         return (
           <SelectColumnFilter
             value={filterState?.select ?? ""}
-            onChange={(v) => updateColumnFilter(accessorStr, "select", v)}
+            onChange={(v) => {
+              if (col.filter?.searchable) {
+                dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "text" }));
+              }
+              updateColumnFilter(accessorStr, "select", v);
+            }}
             options={col.filter.options ?? []}
             placeholder={col.filter.placeholder}
             searchable={col.filter.searchable}
+            onSearchChange={col.filter?.searchable ? (text) => {
+              dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "select" }));
+              if (text) {
+                dispatch(setColumnFilter({ accessor: accessorStr, filterType: "text", value: text }));
+              } else {
+                dispatch(clearColumnFilterAction({ accessor: accessorStr, filterType: "text" }));
+              }
+              setCurrentPage(1);
+            } : undefined}
           />
         );
       case "text":
@@ -483,12 +572,51 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
           </div>
         </div>
         <div className="toolbar-right">
-          <button className="export-btn" onClick={handleExportCSV}>
-            📥 Export CSV
-          </button>
           <button className="export-btn" onClick={handleExportExcel}>
             📊 Export Excel
           </button>
+          <div className="column-picker-container">
+            <button className="column-picker-btn" onClick={() => setShowColumnPicker((v) => !v)}>
+              ☰ Columns
+            </button>
+            {showColumnPicker && (
+              <>
+                <div className="column-picker-overlay" onClick={() => setShowColumnPicker(false)} />
+                <div className="column-picker-dropdown">
+                  <p className="column-picker-header">Toggle Columns</p>
+                  {columns.filter((col) => !col.hidden).map((col) => (
+                    <label key={String(col.accessor)} className="column-picker-item">
+                      <input
+                        type="checkbox"
+                        className="column-picker-checkbox"
+                        checked={columnVisibility[String(col.accessor)] !== false}
+                        onChange={() =>
+                          dispatch(
+                            setColumnVisibility({
+                              ...columnVisibility,
+                              [String(col.accessor)]: !(columnVisibility[String(col.accessor)] ?? true),
+                            }),
+                          )
+                        }
+                      />
+                      {col.header}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            className="reset-filters-btn"
+            onClick={() => {
+              setGlobalSearch("");
+              dispatch(resetColumnFilters());
+              setCurrentPage(1);
+            }}
+          >
+            ↩ Reset Filters
+          </button>
+          {extraToolbarActions}
         </div>
       </div>
 
@@ -497,7 +625,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
           <thead>
             <tr>
               <th style={{ width: "40px" }} className="col-center"></th>
-              {columns.map(col => (
+              {visibleColumns.map(col => (
                 <th
                   key={String(col.accessor)}
                   style={{ width: `${columnWidths[String(col.accessor)]}px` }}
@@ -514,6 +642,24 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                     )}
                   </div>
                   {renderFilter(col)}
+                  {col.searchable !== false && (
+                    <input
+                      type="text"
+                      className="column-search-input"
+                      placeholder={`Search ${col.header}...`}
+                      value={columnFilters[String(col.accessor)]?.text ?? ""}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) {
+                          dispatch(setColumnFilter({ accessor: String(col.accessor), filterType: "text", value: val }));
+                        } else {
+                          dispatch(clearColumnFilterAction({ accessor: String(col.accessor), filterType: "text" }));
+                        }
+                        setCurrentPage(1);
+                      }}
+                    />
+                  )}
                   {col.resizable !== false && (
                     <div
                       className="column-resizer"
@@ -550,7 +696,7 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                         )}
                       </td>
                       
-                      {columns.map(col => {
+                      {visibleColumns.map(col => {
                         const cellClass = getColumnAlignClass(col);
                         const cellContent = renderCell(col, row);
 
@@ -561,7 +707,9 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
                             style={{ width: `${columnWidths[String(col.accessor)]}px` }}
                             onClick={() => onRowClick?.(row)}
                           >
-                            {cellContent}
+                            <div style={{ maxHeight: 80, overflowY: "auto", whiteSpace: "normal" }}>
+                              {cellContent}
+                            </div>
                           </td>
                         );
                       })}

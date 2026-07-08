@@ -184,7 +184,7 @@ export default function FilterTray() {
             AI Relevance
           </span>
           <div className="flex gap-1">
-            {(["all", "yes", "no"] as const).map((key) => (
+            {(["all", "yes", "no", "not_analysed"] as const).map((key) => (
               <Button
                 key={key}
                 size="xs"
@@ -195,7 +195,7 @@ export default function FilterTray() {
                   aiRelevanceFilter === key && "bg-blue-100 text-blue-800 hover:bg-blue-200",
                 )}
               >
-                {key === "all" ? "All" : key === "yes" ? "Yes" : "No"}
+                {key === "all" ? "All" : key === "yes" ? "Yes" : key === "no" ? "No" : "Not Analysed"}
               </Button>
             ))}
           </div>

@@ -34,15 +34,58 @@ export async function analyzeTenderValidity(
   try {
     const { output } = await generateText({
       model,
-      system: `You are a Tender Evaluation Expert. Determine if the following tender brief is related to supply of ANY of the following specific products:
-Cables: LT Power Cables (Armoured and Unarmoured), MV Power Cables (Medium Voltage),Flexible Cablees, Bare Copper Conductor, Control Cables, Signalling Cables, Aerial Bunched (AB) Cables, PVC Cables, XLPE Cables.
-Conductors: ACSR Conductors, AAC Conductors, AAAC Conductors, AL-59 Conductors, AL-7 Conductors, ASTER Conductors, HTLS AECC/TS Conductors, Medium Voltage Covered Conductors (MVCC).
+      system: `You are a Tender Evaluation Expert.
 
-IMPORTANT : IT SHOULD BE SUPPLY OF ABOVE MENTIONED PRODUCTS TO BE VALID. MENTION ITS NOT SUPPLY IF THEY DO NOT SAY SUPPLY OF THAT. 
+Determine whether the following tender brief is specifically for the SUPPLY of any of the following products.
+
+Eligible Products (ONLY these)
+
+Power Cables
+
+LT Power Cables (Armoured or Unarmoured)
+MV Power Cables (Medium Voltage)
+Control Cables
+Signalling Cables
+Aerial Bunched (AB) Cables
+PVC Power Cables
+XLPE Power Cables
+
+Conductors
+
+ACSR Conductors
+AAC Conductors
+AAAC Conductors
+AL-59 Conductors
+AL-7 Conductors
+ASTER Conductors
+HTLS (AECC/TS) Conductors
+Medium Voltage Covered Conductors (MVCC)
+Strict Inclusion Rules
+The tender must explicitly involve the supply, procurement, purchase, or delivery of one or more of the above products.
+If the tender is only for installation, erection, laying, stringing, testing, commissioning, maintenance, repair, replacement, O&M, turnkey/EPC works, consultancy, or services, answer NO, unless the tender explicitly includes the supply of one or more eligible products.
+If the products supplied are not from the above list, answer NO.
+Explicit Exclusions
+
+Always answer NO if the tender is for any of the following:
+
+Flexible Cables
+Optical Fibre Cables (OFC), Fiber Optic Cables, ADSS, OPGW, FTTH or any telecom/communication fibre cables
+Elastomeric Cables or Rubber Cables
+Bare Copper Conductors
+Copper Wires
+House Wiring Cables
+Instrumentation Cables
+Welding Cables
+Solar Cables
+Coaxial Cables
+Ethernet/LAN/Data Cables
+Any cable or conductor not explicitly listed under the Eligible Products section
+Response Format
 
 Respond in EXACTLY the following format:
 ANSWER: YES or NO
-REASON: (a 1-sentence reason why it is or is not relevant to those exact products. Be concise.)`,
+REASON: (One concise sentence explaining whether the tender is specifically for the supply of the eligible cables/conductors.)
+Important: Return YES only when the tender clearly involves the supply/procurement of one or more eligible products listed above. In every other case, return NO.`,
       output: Output.object({
         schema: z.object({
           valid: z.boolean(),

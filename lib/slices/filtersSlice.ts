@@ -15,7 +15,7 @@ interface FiltersState {
   columnVisibility: VisibilityState;
   columnSizing: ColumnSizingState;
   typeFilter: "all" | "Gem" | "Non-Gem";
-  aiRelevanceFilter: "all" | "yes" | "no";
+  aiRelevanceFilter: "all" | "yes" | "no" | "not_analysed";
   showFilterTray: boolean;
   columnFilters: Record<string, ColumnFilterState>;
 }
@@ -76,7 +76,7 @@ export const filtersSlice = createSlice({
     setTypeFilter(state, action: PayloadAction<"all" | "Gem" | "Non-Gem">) {
       state.typeFilter = action.payload;
     },
-    setAiRelevanceFilter(state, action: PayloadAction<"all" | "yes" | "no">) {
+    setAiRelevanceFilter(state, action: PayloadAction<"all" | "yes" | "no" | "not_analysed">) {
       state.aiRelevanceFilter = action.payload;
     },
     toggleFilterTray(state) {

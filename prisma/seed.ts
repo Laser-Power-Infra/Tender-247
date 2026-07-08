@@ -29,11 +29,11 @@ async function main() {
         email: "sandip.das@laserpowerinfra.com",
       },
       {
-        name: "Salil Dutta",
+        name: "Salil Kumar Datta",
         email: "lasertender.six@gmail.com",
       },
       {
-        name: "Dolly",
+        name: "Dolly Kayal",
         email: "execution@gmdalui.co.in",
       },
       {
