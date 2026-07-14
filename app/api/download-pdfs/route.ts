@@ -29,10 +29,10 @@ export async function POST(request: NextRequest) {
             data: { tenderFileUrl: result.pdfPath } as any,
           });
         } catch (dbErr) {
-          console.error(
+          try { console.error(
             `Failed to update DB for tender ${result.gemId}:`,
             dbErr,
-          );
+          ); } catch {}
         }
       }
     }
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       results,
     });
   } catch (error) {
-    console.error("Download PDFs error:", error);
+    try { console.error("Download PDFs error:", error); } catch {}
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Internal server error",

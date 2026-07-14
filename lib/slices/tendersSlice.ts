@@ -90,6 +90,31 @@ export const fetchTendersIncremental = createAsyncThunk(
   },
 );
 
+export const appendTenders = createAsyncThunk(
+  "tenders/appendTenders",
+  async (fileIds: number[], { dispatch }) => {
+    if (fileIds.length === 0) return;
+
+    const limit = pLimit(6);
+
+    const fetches = fileIds.map((id) =>
+      limit(async () => {
+        try {
+          const res = await fetch(`/api/tenders?fileId=${id}`);
+          if (!res.ok) return null;
+          const data: TenderData = await res.json();
+          dispatch(mergeFile(data));
+          return data;
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    await Promise.allSettled(fetches);
+  },
+);
+
 export const tendersSlice = createSlice({
   name: "tenders",
   initialState,
@@ -114,16 +139,24 @@ export const tendersSlice = createSlice({
         };
       } else {
         const existingColumns = new Set(state.data.columns);
+        const newCols: string[] = [];
         for (const col of incoming.columns) {
           if (!existingColumns.has(col)) {
             state.data.columns.push(col);
             existingColumns.add(col);
+            newCols.push(col);
           }
         }
         state.data.rows.push(...incoming.rows);
         state.data.totalGem += incoming.totalGem;
         state.data.totalNonGem += incoming.totalNonGem;
         state.data.fileName = `Files (${state.completedFiles + 1}/${state.totalFiles})`;
+
+        console.log(
+          `[mergeFile] incoming="${incoming.fileName}" cols=${incoming.columns.length} rows=${incoming.rows.length}`,
+          `newCols=${newCols.length > 0 ? JSON.stringify(newCols) : "none"}`,
+          `totalCols=${state.data.columns.length}`,
+        );
       }
 
       state.completedFiles += 1;

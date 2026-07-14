@@ -4,7 +4,9 @@ import { prisma } from "@/lib/prisma";
 interface FlatRow {
   type: "Gem" | "Non-Gem";
   id: string;
-  [key: string]: string;
+  reportings?: string;
+  evaluations?: string;
+  [key: string]: string | undefined;
 }
 
 interface AssociationInfo {
@@ -13,9 +15,9 @@ interface AssociationInfo {
 }
 
 const GEM_DISPLAY_FIELDS = [
-  "referenceNo", "tenderBrief", "value", "deadline", "app", "aps", "apm", "assignedTo", "location",
+  "referenceNo", "tenderBrief", "value", "deadline", "quantity", "app", "aps", "apm", "assignedTo", "location",
   "organization", "documentFees", "emd", "msmeExemption",
-  "startupExemption", "quantity", "bidOpeningDateTime",
+  "startupExemption", "bidOpeningDateTime",
   "bidOfferValidity", "ministryStateName", "departmentName",
   "officeName", "minimumAverageAnnualTurnover", "yearsOfPastExperience",
   "oemAverageTurnover", "contractPeriod",
@@ -31,27 +33,96 @@ const GEM_DISPLAY_FIELDS = [
   "t247Id", "scrapedDate", "source", "assignedTo",
   "markedStatus", "sheetStatus", "ready", "searchKey",
   "downloadLink", "currency",
+  "bidStatus", "differenceBetweenRank1",
 ] as const;
 
 const NON_GEM_DISPLAY_FIELDS = [
-  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline", "app", "aps", "apm", "assignedTo",
+  "referenceNo", "tenderBrief", "estimatedBidValue", "deadline", "quantity", "app", "aps", "apm", "assignedTo",
   "location", "organization", "documentFees", "emd",
-  "msmeExemption", "startupExemption", "quantity", "checklist",
+  "msmeExemption", "startupExemption", "checklist",
   "t247Id", "scrapedDate", "source", "assignedTo",
   "markedStatus", "sheetStatus", "ready", "searchKey",
   "downloadLink", "currency",
 ] as const;
 
-const ALL_KNOWN_FIELDS = [
-  ...new Set([
+const ALL_KNOWN_FIELDS = (() => {
+  const fields = [...new Set([
     ...GEM_DISPLAY_FIELDS,
     ...NON_GEM_DISPLAY_FIELDS,
     "aiRelevanceValid",
     "aiRelevanceReason",
     "excludedCategory",
     "tenderFileUrl",
-  ]),
-];
+    "itemCategory",
+    "totalQuantity",
+    "reportings",
+    "evaluations",
+    "parseStatus",
+    "parseError",
+  ])];
+  const urlIdx = fields.indexOf("tenderFileUrl");
+  if (urlIdx > 0) {
+    fields.splice(urlIdx, 1);
+    fields.splice(10, 0, "tenderFileUrl");
+  }
+  const catIdx = fields.indexOf("itemCategory");
+  if (catIdx > 0) {
+    fields.splice(catIdx, 1);
+    fields.splice(11, 0, "itemCategory");
+  }
+  const qtyIdx = fields.indexOf("totalQuantity");
+  if (qtyIdx > 0) {
+    fields.splice(qtyIdx, 1);
+    fields.splice(12, 0, "totalQuantity");
+  }
+  const repIdx = fields.indexOf("reportings");
+  if (repIdx > 0) {
+    fields.splice(repIdx, 1);
+    fields.splice(13, 0, "reportings");
+  }
+  const evalIdx = fields.indexOf("evaluations");
+  if (evalIdx > 0) {
+    fields.splice(evalIdx, 1);
+    fields.splice(14, 0, "evaluations");
+  }
+  const bsIdx = fields.indexOf("bidStatus");
+  if (bsIdx > 0) {
+    fields.splice(bsIdx, 1);
+    fields.splice(15, 0, "bidStatus");
+  }
+  const diffIdx = fields.indexOf("differenceBetweenRank1");
+  if (diffIdx > 0) {
+    fields.splice(diffIdx, 1);
+    fields.splice(16, 0, "differenceBetweenRank1");
+  }
+  const psIdx = fields.indexOf("parseStatus");
+  if (psIdx > 0) {
+    fields.splice(psIdx, 1);
+    fields.splice(17, 0, "parseStatus");
+  }
+  const peIdx = fields.indexOf("parseError");
+  if (peIdx > 0) {
+    fields.splice(peIdx, 1);
+    fields.splice(18, 0, "parseError");
+  }
+  return fields;
+})();
+
+interface ReportingInfo {
+  id: number;
+  officer: string;
+  address: string | null;
+  quantity: string | null;
+}
+
+interface EvaluationInfo {
+  id: number;
+  sellerName: string;
+  offeredItem: string | null;
+  totalPrice: string | null;
+  rank: string | null;
+  status: string | null;
+}
 
 function flattenTender(
   tender: Record<string, unknown>,
@@ -59,6 +130,8 @@ function flattenTender(
   type: "Gem" | "Non-Gem",
   id: number,
   tenderAssociations: { association: AssociationInfo }[],
+  reportings?: ReportingInfo[],
+  evaluations?: EvaluationInfo[],
 ): FlatRow {
   const assignedIds = tenderAssociations.map((ta) => ta.association.id).join(",");
   const row: FlatRow = { type, id: String(id) };
@@ -76,6 +149,18 @@ function flattenTender(
 
   for (const ef of extraFields) {
     row[ef.fieldName] = ef.fieldValue ?? "";
+  }
+
+  if (reportings && reportings.length > 0) {
+    row.reportings = JSON.stringify(reportings);
+  } else {
+    row.reportings = "";
+  }
+
+  if (evaluations && evaluations.length > 0) {
+    row.evaluations = JSON.stringify(evaluations);
+  } else {
+    row.evaluations = "";
   }
 
   return row;
@@ -103,7 +188,7 @@ export async function GET(request: NextRequest) {
     const [gemTenders, nonGemTenders, allAssociations] = await Promise.all([
       prisma.gemTender.findMany({
         where: { fileId },
-        include: { extraFields: true, tenderAssociations: { include: { association: true } } },
+        include: { extraFields: true, tenderAssociations: { include: { association: true } }, reportings: true, evaluations: true },
       }),
       prisma.nonGemTender.findMany({
         where: { fileId },
@@ -117,7 +202,7 @@ export async function GET(request: NextRequest) {
     const rows: FlatRow[] = [];
 
     for (const t of gemTenders) {
-      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Gem", t.id, t.tenderAssociations));
+      rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Gem", t.id, t.tenderAssociations, t.reportings, t.evaluations));
     }
     for (const t of nonGemTenders) {
       rows.push(flattenTender(t as unknown as Record<string, unknown>, t.extraFields, "Non-Gem", t.id, t.tenderAssociations));

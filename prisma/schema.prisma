@@ -125,15 +125,32 @@ model GemTender {
 
   tenderFileUrl String?
 
+  parseStatus String? @map("parse_status")
+  parseError  String? @map("parse_error")
+
+  itemCategory  String?
+  totalQuantity String?
+
+  bidStatus           String?
+  differenceBetweenRank1 String?
+
   app  Decision @default(NOT_DECIDED)
   aps  Decision @default(NOT_DECIDED)
   apm  Decision @default(NOT_DECIDED)
+
+  tenderStatusId Int?
+  tenderStatus   TenderStatusTable? @relation("GemTenderStatus", fields: [tenderStatusId], references: [id], onDelete: SetNull)
+  state          String?
+  website        String?
+  locationCount  Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   extraFields TenderExtraField[]
   tenderAssociations TenderAssociation[]
+  reportings  Reporting[]
+  evaluations Evaluation[]
 
   @@index([fileId])
   @@map("gem_tenders")
@@ -185,6 +202,12 @@ model NonGemTender {
   app  Decision @default(NOT_DECIDED)
   aps  Decision @default(NOT_DECIDED)
   apm  Decision @default(NOT_DECIDED)
+
+  tenderStatusId Int?
+  tenderStatus   TenderStatusTable? @relation("NonGemTenderStatus", fields: [tenderStatusId], references: [id], onDelete: SetNull)
+  state          String?
+  website        String?
+  locationCount  Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -263,4 +286,59 @@ model TenderAssociation {
   @@map("tender_associations")
 }
 
+// ---------- REPORTING ----------
+model Reporting {
+  id          Int      @id @default(autoincrement())
+  gemTenderId Int
+  gemTender   GemTender @relation(fields: [gemTenderId], references: [id], onDelete: Cascade)
 
+  officer  String
+  address  String?
+  quantity String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([gemTenderId])
+  @@map("reportings")
+}
+
+// ---------- TENDER STATUS TABLE ----------
+model TenderStatusTable {
+  id              Int      @id @default(autoincrement())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  state           String?
+  website         String?
+  type            String   @default("GEM")
+  userId          String?
+  password        String?
+  mobileNo        String?
+  profilePassword String?
+  dscName         String?
+  dscPassword     String?
+
+  gemTenders      GemTender[]       @relation("GemTenderStatus")
+  nonGemTenders   NonGemTender[]    @relation("NonGemTenderStatus")
+
+  @@map("tender_status_table")
+}
+
+// ---------- EVALUATION ----------
+model Evaluation {
+  id          Int      @id @default(autoincrement())
+  gemTenderId Int
+  gemTender   GemTender @relation(fields: [gemTenderId], references: [id], onDelete: Cascade)
+
+  sellerName  String
+  offeredItem String?
+  totalPrice  String?
+  rank        String?
+  status      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([gemTenderId])
+  @@map("evaluations")
+}

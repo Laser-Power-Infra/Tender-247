@@ -63,7 +63,7 @@ function buildCreateData(
   headers: string[],
   fileId: number,
   knownFieldSet: Set<string>,
-  excludedCategory: string | null
+  excludedCategory: string | null,
 ): { refNo: string; createData: Record<string, unknown> } {
   const refNo = getReferenceNo(row, headers) || "";
   const { knownFields, extraFields } = mapRowToTender(row, knownFieldSet);
@@ -94,7 +94,7 @@ function parseSheetData(
   sheetName: string,
   cableKeywords: string[],
   conductorsKeywords: string[],
-  today: Date
+  today: Date,
 ): ParsedSheet {
   const sheet = workbook.Sheets[sheetName];
   const jsonData: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, {
@@ -102,13 +102,25 @@ function parseSheetData(
   });
 
   if (!jsonData.length) {
-    return { sheetName, gemPrepared: [], nonGemPrepared: [], skipped: true, excludedCount: 0 };
+    return {
+      sheetName,
+      gemPrepared: [],
+      nonGemPrepared: [],
+      skipped: true,
+      excludedCount: 0,
+    };
   }
 
   const headers = Object.keys(jsonData[0]);
 
   if (!hasReferenceNoColumn(headers)) {
-    return { sheetName, gemPrepared: [], nonGemPrepared: [], skipped: true, excludedCount: 0 };
+    return {
+      sheetName,
+      gemPrepared: [],
+      nonGemPrepared: [],
+      skipped: true,
+      excludedCount: 0,
+    };
   }
 
   const gemPrepared: PreparedTender[] = [];
@@ -152,7 +164,7 @@ function parseSheetData(
         headers,
         0,
         GEM_FIELDS,
-        excludedCategory
+        excludedCategory,
       );
       gemPrepared.push({ refNo: r, createData });
     } else {
@@ -161,7 +173,7 @@ function parseSheetData(
         headers,
         0,
         NON_GEM_FIELDS,
-        excludedCategory
+        excludedCategory,
       );
       nonGemPrepared.push({ refNo: r, createData });
     }
@@ -179,11 +191,11 @@ function parseSheetData(
 async function insertGemPrepared(
   prepared: PreparedTender[],
   fileId: number,
-  sheetResult: SheetResult
+  sheetResult: SheetResult,
 ): Promise<void> {
   if (!prepared.length) return;
 
-  const refNos = prepared.map(p => p.refNo);
+  const refNos = prepared.map((p) => p.refNo);
 
   const existingRecords = await prisma.gemTender.findMany({
     where: { referenceNo: { in: refNos } },
@@ -192,17 +204,27 @@ async function insertGemPrepared(
 
   if (existingRecords.length > 0) {
     await prisma.gemTender.deleteMany({
-      where: { referenceNo: { in: existingRecords.map(r => r.referenceNo) } },
+      where: { referenceNo: { in: existingRecords.map((r) => r.referenceNo) } },
     });
   }
 
-  const createDataList = prepared.map(p => {
-    const existing = existingRecords.find(r => r.referenceNo === p.refNo);
+  const createDataList = prepared.map((p) => {
+    const existing = existingRecords.find((r) => r.referenceNo === p.refNo);
 
     if (existing) {
-      const { id, fileId: _oldFileId, createdAt, updatedAt, referenceNo, extraFields, ...oldData } = existing;
+      const {
+        id,
+        fileId: _oldFileId,
+        createdAt,
+        updatedAt,
+        referenceNo,
+        extraFields,
+        ...oldData
+      } = existing;
       const newDeadline = p.createData.deadline as Date | undefined;
-      const newExcludedCategory = p.createData.excludedCategory as string | null;
+      const newExcludedCategory = p.createData.excludedCategory as
+        | string
+        | null;
 
       return {
         ...oldData,
@@ -210,9 +232,15 @@ async function insertGemPrepared(
         deadline: newDeadline ?? oldData.deadline,
         excludedCategory: newExcludedCategory,
         fileId,
-        extraFields: extraFields.length > 0
-          ? { create: extraFields.map(ef => ({ fieldName: ef.fieldName, fieldValue: ef.fieldValue })) }
-          : undefined,
+        extraFields:
+          extraFields.length > 0
+            ? {
+                create: extraFields.map((ef) => ({
+                  fieldName: ef.fieldName,
+                  fieldValue: ef.fieldValue,
+                })),
+              }
+            : undefined,
       };
     }
 
@@ -225,17 +253,19 @@ async function insertGemPrepared(
     try {
       await prisma.$transaction(
         batch.map((data) => prisma.gemTender.create({ data: data as any })),
-        { timeout: TX_TIMEOUT }
+        { timeout: TX_TIMEOUT },
       );
       sheetResult.gemCount += batch.length;
-    } catch {
+    } catch (error) {
+      console.error(error);
+
       for (const data of batch) {
         try {
           await prisma.gemTender.create({ data: data as any });
           sheetResult.gemCount++;
         } catch (err) {
           sheetResult.errors.push(
-            `Gem row ${(data as any).referenceNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`
+            `Gem row ${(data as any).referenceNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`,
           );
         }
       }
@@ -246,11 +276,11 @@ async function insertGemPrepared(
 async function insertNonGemPrepared(
   prepared: PreparedTender[],
   fileId: number,
-  sheetResult: SheetResult
+  sheetResult: SheetResult,
 ): Promise<void> {
   if (!prepared.length) return;
 
-  const refNos = prepared.map(p => p.refNo);
+  const refNos = prepared.map((p) => p.refNo);
 
   const existingRecords = await prisma.nonGemTender.findMany({
     where: { referenceNo: { in: refNos } },
@@ -259,17 +289,27 @@ async function insertNonGemPrepared(
 
   if (existingRecords.length > 0) {
     await prisma.nonGemTender.deleteMany({
-      where: { referenceNo: { in: existingRecords.map(r => r.referenceNo) } },
+      where: { referenceNo: { in: existingRecords.map((r) => r.referenceNo) } },
     });
   }
 
-  const createDataList = prepared.map(p => {
-    const existing = existingRecords.find(r => r.referenceNo === p.refNo);
+  const createDataList = prepared.map((p) => {
+    const existing = existingRecords.find((r) => r.referenceNo === p.refNo);
 
     if (existing) {
-      const { id, fileId: _oldFileId, createdAt, updatedAt, referenceNo, extraFields, ...oldData } = existing;
+      const {
+        id,
+        fileId: _oldFileId,
+        createdAt,
+        updatedAt,
+        referenceNo,
+        extraFields,
+        ...oldData
+      } = existing;
       const newDeadline = p.createData.deadline as Date | undefined;
-      const newExcludedCategory = p.createData.excludedCategory as string | null;
+      const newExcludedCategory = p.createData.excludedCategory as
+        | string
+        | null;
 
       return {
         ...oldData,
@@ -277,9 +317,15 @@ async function insertNonGemPrepared(
         deadline: newDeadline ?? oldData.deadline,
         excludedCategory: newExcludedCategory,
         fileId,
-        extraFields: extraFields.length > 0
-          ? { create: extraFields.map(ef => ({ fieldName: ef.fieldName, fieldValue: ef.fieldValue })) }
-          : undefined,
+        extraFields:
+          extraFields.length > 0
+            ? {
+                create: extraFields.map((ef) => ({
+                  fieldName: ef.fieldName,
+                  fieldValue: ef.fieldValue,
+                })),
+              }
+            : undefined,
       };
     }
 
@@ -292,17 +338,18 @@ async function insertNonGemPrepared(
     try {
       await prisma.$transaction(
         batch.map((data) => prisma.nonGemTender.create({ data: data as any })),
-        { timeout: TX_TIMEOUT }
+        { timeout: TX_TIMEOUT },
       );
       sheetResult.nonGemCount += batch.length;
-    } catch {
+    } catch (error) {
+      console.error(error);
       for (const data of batch) {
         try {
           await prisma.nonGemTender.create({ data: data as any });
           sheetResult.nonGemCount++;
         } catch (err) {
           sheetResult.errors.push(
-            `Non-gem row ${(data as any).referenceNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`
+            `Non-gem row ${(data as any).referenceNo || "unknown"}: ${err instanceof Error ? err.message : "Unknown error"}`,
           );
         }
       }
@@ -316,10 +363,7 @@ export async function POST(request: NextRequest) {
     const files = formData.getAll("files") as File[];
 
     if (!files.length) {
-      return NextResponse.json(
-        { error: "No files provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
 
     const results: FileResult[] = [];
@@ -334,10 +378,9 @@ export async function POST(request: NextRequest) {
     console.error("Upload error:", error);
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Internal server error",
+        error: error instanceof Error ? error.message : "Internal server error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -362,14 +405,14 @@ async function processFile(file: File): Promise<FileResult> {
   const cableRow = keywordRows.find((r) => r.category === "cable");
   const conductorsRow = keywordRows.find((r) => r.category === "conductors");
 
-  function parseKeywordRow(row: (typeof cableRow)): string[] {
+  function parseKeywordRow(row: typeof cableRow): string[] {
     if (!row || !row.keywords) return [];
     return [
       ...new Set(
         row.keywords
           .split(",")
           .map((k) => k.trim().toLowerCase())
-          .filter(Boolean)
+          .filter(Boolean),
       ),
     ];
   }
@@ -398,7 +441,13 @@ async function processFile(file: File): Promise<FileResult> {
 
   const sheetTasks = workbook.SheetNames.map((sheetName) =>
     limit(async () => {
-      const parsed = parseSheetData(workbook, sheetName, cableKeywords, conductorsKeywords, today);
+      const parsed = parseSheetData(
+        workbook,
+        sheetName,
+        cableKeywords,
+        conductorsKeywords,
+        today,
+      );
 
       const sheetResult: SheetResult = {
         sheetName: parsed.sheetName,
@@ -417,7 +466,7 @@ async function processFile(file: File): Promise<FileResult> {
       ]);
 
       return sheetResult;
-    })
+    }),
   );
 
   const sheetResults = await Promise.all(sheetTasks);

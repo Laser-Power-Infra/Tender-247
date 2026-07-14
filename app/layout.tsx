@@ -25,7 +25,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-slate-50">
         <StoreProvider>{children}</StoreProvider>
-        <Toaster />
+        <Toaster richColors />
       </body>
     </html>
   );

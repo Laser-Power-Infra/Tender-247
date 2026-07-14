@@ -157,6 +157,7 @@
   border-spacing: 0;
   table-layout: fixed;
   font-size: 13px;
+  /* padding-right: 300px; */
 }
 
 /* Table Headers */
@@ -177,10 +178,41 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  
 }
 
 .optimized-tender-data-table th:last-child {
   border-right: none;
+}
+
+/* Sticky first column (expansion toggle) */
+.optimized-tender-data-table th:first-child {
+  /* position: sticky; */
+  left: 0;
+  /* z-index: 4; */
+  background-color: var(--color-bg-light);
+}
+
+.optimized-tender-data-table td:first-child {
+  /* position: sticky; */
+  left: 0;
+  z-index: 2;
+  background-color: inherit;
+}
+
+/* Sticky referenceNo column */
+.optimized-tender-data-table th.sticky-first-column {
+  position: sticky;
+  left: 0px;
+  z-index: 3;
+  background-color: var(--color-bg-light);
+}
+
+.optimized-tender-data-table td.sticky-first-column {
+  position: sticky;
+  left: 0px;
+  z-index: 1;
+  background-color: inherit;
 }
 
 .header-content {

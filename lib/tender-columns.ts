@@ -17,6 +17,7 @@ const GEM_FIELDS = new Set([
   "t247Id", "scrapedDate", "source", "assignedTo",
   "markedStatus", "sheetStatus", "ready", "searchKey",
   "downloadLink", "currency",
+  "itemCategory", "totalQuantity",
 ]);
 
 const NON_GEM_FIELDS = new Set([
@@ -97,6 +98,7 @@ const COLUMN_MAP: ColumnMap = {
 
   quantity: "quantity",
   size: "quantity",
+  "quantity/size": "quantity",
 
   msmeExemption: "msmeExemption",
   startupExemption: "startupExemption",
@@ -208,6 +210,16 @@ const COLUMN_MAP: ColumnMap = {
   downloadLink: "downloadLink",
 
   currency: "currency",
+
+  itemCategory: "itemCategory",
+  itemcategory: "itemCategory",
+  "Item Category": "itemCategory",
+
+  totalQuantity: "totalQuantity",
+  totalquantity: "totalQuantity",
+  "Total Quantity": "totalQuantity",
+  totalQty: "totalQuantity",
+  totalqty: "totalQuantity",
 };
 
 const NORMALIZED_COLUMN_MAP: ColumnMap = (() => {
@@ -316,6 +328,7 @@ function findReferenceNoColumn(
     const n = normalizeHeader(h);
     if (n.includes("ref") && n.includes("no")) return h;
     if (n === "tenderid" || n === "tid") return h;
+    if (NORMALIZED_COLUMN_MAP[n] === "referenceNo") return h;
   }
   return undefined;
 }

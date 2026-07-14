@@ -1,5 +1,6 @@
 import { PrismaClient } from "../generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { syncMasterWebsites } from "../lib/google-sheets";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg(process.env.DATABASE_URL!),
@@ -22,6 +23,7 @@ async function main() {
     skipDuplicates: true,
   });
 
+  await prisma.association.deleteMany();
   await prisma.association.createMany({
     data: [
       {
@@ -47,6 +49,12 @@ async function main() {
     ],
     skipDuplicates: true,
   });
+
+  const result = await syncMasterWebsites();
+  if (result.errors.length) {
+    console.error("❌ Errors syncing tender status records:", result.errors);
+  }
+  console.log(`✅ Synced ${result.total} tender status records from Google Sheets.`);
 
   console.log("✅ Seed completed.");
 }
