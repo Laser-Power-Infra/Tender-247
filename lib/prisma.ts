@@ -5,8 +5,13 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
+console.log("current env ", process.env.ENVIRONMENT)
 function createPrismaClient() {
-  const adapter = new PrismaPg(process.env.DATABASE_URL!);
+  const adapter = new PrismaPg(
+    process.env.ENVIRONMENT === "PROD"
+      ? process.env.DATABASE_URL!
+      : process.env.DATABASE_URL_DEV!,
+  );
   return new PrismaClient({ adapter });
 }
 

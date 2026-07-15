@@ -695,18 +695,37 @@ export default function TenderTable({
           }
           continue;
         }
-        try {
-          const currentRow = rows[i];
-          if (currentRow) {
+        const currentRow = rows[i];
+        if (currentRow) {
+          try {
             await saveAiRelevance({
               id: Number(currentRow.id),
               type: currentRow.type as "Gem" | "Non-Gem",
               valid: result.data.valid,
               reason: result.data.reason,
             });
+          } catch {
+            console.error(`Failed to save AI relevance for row ${i}`);
           }
-        } catch {
-          console.error(`Failed to save AI relevance for row ${i}`);
+
+          if (result.data.valid && currentRow.type === "Gem") {
+            const gemId = currentRow.referenceNo as string | undefined;
+            if (gemId) {
+              const dlRes = await fetch("/api/download-pdfs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ tenders: [{ id: Number(currentRow.id), gemId }] }),
+              });
+              const dlData = await dlRes.json();
+              if (dlData.success > 0) {
+                await fetch("/api/parse-pdfs", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ tenders: [{ id: Number(currentRow.id) }] }),
+                });
+              }
+            }
+          }
         }
 
         setAnalysisResults((prev) => ({

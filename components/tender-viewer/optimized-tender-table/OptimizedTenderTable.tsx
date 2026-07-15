@@ -470,7 +470,21 @@ export function OptimizedTenderTable<T extends Record<string, unknown>>({
       const [refCol] = filtered.splice(refIdx, 1);
       filtered.unshift(refCol);
     }
-    // console.log("Visible columns count:", filtered.length, "| Last 10:", filtered.slice(-10).map(c => c.header));
+
+    const locIdx = filtered.findIndex(
+      (col) => String(col.accessor) === "location",
+    );
+    const webIdx = filtered.findIndex(
+      (col) => String(col.accessor) === "website",
+    );
+    if (locIdx >= 0 && webIdx >= 0) {
+      const [webCol] = filtered.splice(webIdx, 1);
+      const newLocIdx = filtered.findIndex(
+        (col) => String(col.accessor) === "location",
+      );
+      filtered.splice(newLocIdx + 1, 0, webCol);
+    }
+
     return filtered;
   }, [columns, columnVisibility]);
 

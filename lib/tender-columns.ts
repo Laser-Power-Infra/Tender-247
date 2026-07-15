@@ -298,7 +298,8 @@ export function mapRowToTender(
     if (isIgnoredHeader(header)) continue;
 
     const normalized = normalizeHeader(header);
-    const mappedField = NORMALIZED_COLUMN_MAP[normalized];
+    const mappedField = NORMALIZED_COLUMN_MAP[normalized]
+      ?? (/quantity|qty/.test(normalized) && /size/.test(normalized) ? "quantity" : undefined);
 
     if (mappedField && knownFieldSet.has(mappedField)) {
       if (mappedField === "deadline") {

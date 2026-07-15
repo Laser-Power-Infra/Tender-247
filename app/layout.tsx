@@ -8,9 +8,8 @@ import StoreProvider from "@/lib/store-provider";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Tender247 - Upload & Parse Tender Files",
-  description:
-    "Upload Excel files and parse tender data into GEM and Non-GEM categories",
+  title: "Tenders",
+  description: "tenders",
 };
 
 export default function RootLayout({

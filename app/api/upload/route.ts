@@ -65,7 +65,7 @@ function buildCreateData(
   knownFieldSet: Set<string>,
   excludedCategory: string | null,
 ): { refNo: string; createData: Record<string, unknown> } {
-  const refNo = getReferenceNo(row, headers) || "";
+  const refNo = (getReferenceNo(row, headers) || "").toUpperCase();
   const { knownFields, extraFields } = mapRowToTender(row, knownFieldSet);
 
   const createData: Record<string, unknown> = {
@@ -128,7 +128,7 @@ function parseSheetData(
   let excludedCount = 0;
 
   for (const row of jsonData) {
-    const refNo = getReferenceNo(row, headers);
+    const refNo = (getReferenceNo(row, headers) || "").toUpperCase();
     if (!refNo) continue;
 
     const tenderBrief = getFieldValue(row, headers, "tenderBrief");
@@ -199,55 +199,28 @@ async function insertGemPrepared(
 
   const existingRecords = await prisma.gemTender.findMany({
     where: { referenceNo: { in: refNos } },
-    include: { extraFields: true },
   });
 
-  if (existingRecords.length > 0) {
-    await prisma.gemTender.deleteMany({
-      where: { referenceNo: { in: existingRecords.map((r) => r.referenceNo) } },
-    });
+  const existingMap = new Map(existingRecords.map((r) => [r.referenceNo, r]));
+
+  const toCreate: Record<string, unknown>[] = [];
+
+  for (const p of prepared) {
+    const old = existingMap.get(p.refNo);
+    if (old) {
+      const newDeadline = p.createData.deadline as Date | undefined;
+      if (newDeadline && (!old.deadline || newDeadline.getTime() > old.deadline.getTime())) {
+        await prisma.gemTender.update({
+          where: { id: old.id },
+          data: { deadline: newDeadline },
+        });
+      }
+    } else {
+      toCreate.push({ ...p.createData, fileId });
+    }
   }
 
-  const createDataList = prepared.map((p) => {
-    const existing = existingRecords.find((r) => r.referenceNo === p.refNo);
-
-    if (existing) {
-      const {
-        id,
-        fileId: _oldFileId,
-        createdAt,
-        updatedAt,
-        referenceNo,
-        extraFields,
-        ...oldData
-      } = existing;
-      const newDeadline = p.createData.deadline as Date | undefined;
-      const newExcludedCategory = p.createData.excludedCategory as
-        | string
-        | null;
-
-      return {
-        ...oldData,
-        referenceNo,
-        deadline: newDeadline ?? oldData.deadline,
-        excludedCategory: newExcludedCategory,
-        fileId,
-        extraFields:
-          extraFields.length > 0
-            ? {
-                create: extraFields.map((ef) => ({
-                  fieldName: ef.fieldName,
-                  fieldValue: ef.fieldValue,
-                })),
-              }
-            : undefined,
-      };
-    }
-
-    return { ...p.createData, fileId };
-  });
-
-  const batches = chunk(createDataList, INSERT_BATCH_SIZE);
+  const batches = chunk(toCreate, INSERT_BATCH_SIZE);
 
   for (const batch of batches) {
     try {
@@ -284,55 +257,28 @@ async function insertNonGemPrepared(
 
   const existingRecords = await prisma.nonGemTender.findMany({
     where: { referenceNo: { in: refNos } },
-    include: { extraFields: true },
   });
 
-  if (existingRecords.length > 0) {
-    await prisma.nonGemTender.deleteMany({
-      where: { referenceNo: { in: existingRecords.map((r) => r.referenceNo) } },
-    });
+  const existingMap = new Map(existingRecords.map((r) => [r.referenceNo, r]));
+
+  const toCreate: Record<string, unknown>[] = [];
+
+  for (const p of prepared) {
+    const old = existingMap.get(p.refNo);
+    if (old) {
+      const newDeadline = p.createData.deadline as Date | undefined;
+      if (newDeadline && (!old.deadline || newDeadline.getTime() > old.deadline.getTime())) {
+        await prisma.nonGemTender.update({
+          where: { id: old.id },
+          data: { deadline: newDeadline },
+        });
+      }
+    } else {
+      toCreate.push({ ...p.createData, fileId });
+    }
   }
 
-  const createDataList = prepared.map((p) => {
-    const existing = existingRecords.find((r) => r.referenceNo === p.refNo);
-
-    if (existing) {
-      const {
-        id,
-        fileId: _oldFileId,
-        createdAt,
-        updatedAt,
-        referenceNo,
-        extraFields,
-        ...oldData
-      } = existing;
-      const newDeadline = p.createData.deadline as Date | undefined;
-      const newExcludedCategory = p.createData.excludedCategory as
-        | string
-        | null;
-
-      return {
-        ...oldData,
-        referenceNo,
-        deadline: newDeadline ?? oldData.deadline,
-        excludedCategory: newExcludedCategory,
-        fileId,
-        extraFields:
-          extraFields.length > 0
-            ? {
-                create: extraFields.map((ef) => ({
-                  fieldName: ef.fieldName,
-                  fieldValue: ef.fieldValue,
-                })),
-              }
-            : undefined,
-      };
-    }
-
-    return { ...p.createData, fileId };
-  });
-
-  const batches = chunk(createDataList, INSERT_BATCH_SIZE);
+  const batches = chunk(toCreate, INSERT_BATCH_SIZE);
 
   for (const batch of batches) {
     try {

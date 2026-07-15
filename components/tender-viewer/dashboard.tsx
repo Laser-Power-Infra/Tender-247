@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useCallback, useMemo, useState, useRef } from "react";
+import React, {
+  useEffect,
+  useCallback,
+  useMemo,
+  useState,
+  useRef,
+} from "react";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { fetchFiles } from "@/lib/slices/filesSlice";
 import {
@@ -8,16 +14,19 @@ import {
   appendTenders,
   updateTenderCell,
   updateTenderAssignments,
+  saveFeedbackAndReanalyze,
 } from "@/lib/slices/tendersSlice";
 import { setExclusionFilter } from "@/lib/slices/filtersSlice";
+import { toast } from "sonner";
 import ActionArea from "@/components/tender-viewer/action-area";
 import ConfirmAnalysisDialog from "@/components/tender-viewer/confirm-analysis-dialog";
+import AiFeedbackDialog from "@/components/tender-viewer/ai-feedback-dialog";
 import TenderTable from "@/components/tender-viewer/tender-table";
 import ReferenceTenderTable from "@/reference/TenderTable";
 import FileUpload from "@/components/upload/file-upload";
 import AnalyticsCards from "@/components/tender-viewer/analytics-cards";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
+import { Loader2, MessageSquare } from "lucide-react";
 import {
   OptimizedTenderTable,
   ColumnDef,
@@ -41,14 +50,21 @@ export default function Dashboard() {
   const loadingTenders = useAppSelector((s) => s.tenders.loading);
   const totalFiles = useAppSelector((s) => s.tenders.totalFiles);
   const completedFiles = useAppSelector((s) => s.tenders.completedFiles);
+  const updatingCells = useAppSelector((s) => s.tenders.updatingCells);
   const uploadResults = useAppSelector((s) => s.upload.results);
+
+  const [feedbackRow, setFeedbackRow] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const feedbackSaving = useAppSelector((s) => s.tenders.feedbackSaving);
 
   const prevTenderDataRef = useRef(tenderData);
   const prevOrderedColsRef = useRef<string[]>([]);
   useEffect(() => {
     if (prevTenderDataRef.current !== tenderData) {
       const added = tenderData?.columns.filter(
-        c => !prevTenderDataRef.current?.columns.includes(c)
+        (c) => !prevTenderDataRef.current?.columns.includes(c),
       );
       // console.log(
       //   `[tenderData changed] identity=${Object.is(prevTenderDataRef.current, tenderData)}`,
@@ -118,6 +134,7 @@ export default function Dashboard() {
       if (!tenderData) return;
       const oldValue = tenderData.rows[rowIndex]?.[col] ?? "";
       if (oldValue === value) return;
+      const toastId = toast.loading(`Updating ${col.toUpperCase()}...`);
       dispatch(
         updateTenderCell({
           rowIndex,
@@ -127,9 +144,47 @@ export default function Dashboard() {
           id: parseInt(id, 10),
           oldValue,
         }),
-      );
+      )
+        .unwrap()
+        .then(() => {
+          toast.success(`${col.toUpperCase()} set to ${value}`, {
+            id: toastId,
+          });
+        })
+        .catch((err: Error) => {
+          toast.error(`Failed to update: ${err.message}`, { id: toastId });
+        });
     },
     [tenderData, dispatch],
+  );
+
+  const handleSaveFeedback = useCallback(
+    (params: {
+      tenderId: number;
+      tenderType: string;
+      briefText: string;
+      originalAi: string;
+      correctedAi: string;
+      feedbackReason: string;
+    }) => {
+      const toastId = toast.loading("Saving feedback and re-analyzing...");
+      dispatch(saveFeedbackAndReanalyze(params))
+        .unwrap()
+        .then(() => {
+          toast.success("Feedback saved, tender re-analyzed", { id: toastId });
+        })
+        .catch((err: Error) => {
+          const msg =
+            err.message === "rate_limit"
+              ? "Re-analysis rate limited, try again later"
+              : `Failed: ${err.message}`;
+          toast.error(msg, { id: toastId });
+        })
+        .finally(() => {
+          setFeedbackRow(null);
+        });
+    },
+    [dispatch],
   );
 
   const selectFilterOptions = useMemo(() => {
@@ -154,14 +209,25 @@ export default function Dashboard() {
     if (!tenderData) return [];
     console.table(tenderData.columns);
     const skipCols = new Set([
-      "sr. no.", "sr no", "s.no", "s. no", "serial no", "serial no.", "sn", "sno",
+      "sr. no.",
+      "sr no",
+      "s.no",
+      "s. no",
+      "serial no",
+      "serial no.",
+      "sn",
+      "sno",
       "s r. n o.",
-      "excluded category", "excludedcategory",
-      "ai relevance", "ai relevance valid", "ai relevance reason",
-      "searchkey", "ready",
+      "excluded category",
+      "excludedcategory",
+      "ai relevance",
+      "ai relevance valid",
+      "ai relevance reason",
+      "searchkey",
+      "ready",
     ]);
     const seen = new Set<string>();
-    const cols = [...tenderData.columns].filter(col => {
+    const cols = [...tenderData.columns].filter((col) => {
       const normalized = col.toLowerCase().trim().replace(/\s+/g, " ");
       if (skipCols.has(normalized)) return false;
       if (seen.has(normalized)) return false;
@@ -178,8 +244,11 @@ export default function Dashboard() {
       cols.splice(reasonIdx, 1);
       cols.splice(3, 0, "aiRelevanceReason");
     }
-    const normalizeMatch = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
-    const qtySizeIdx = cols.findIndex(c => normalizeMatch(c) === "quantity / size");
+    const normalizeMatch = (s: string) =>
+      s.toLowerCase().trim().replace(/\s+/g, " ");
+    const qtySizeIdx = cols.findIndex(
+      (c) => normalizeMatch(c) === "quantity / size",
+    );
     if (qtySizeIdx >= 0) {
       const rawName = cols[qtySizeIdx];
       cols.splice(qtySizeIdx, 1);
@@ -230,26 +299,6 @@ export default function Dashboard() {
     });
   }, [tenderData, exclusionFilter]);
 
-  const [aiAnalysisState, setAiAnalysisState] = useState<{
-    isAnalyzing: boolean;
-    currentIndex: number | null;
-    results: Record<number, { valid: boolean; reason: string }>;
-  }>({ isAnalyzing: false, currentIndex: null, results: {} });
-
-  const aiAnalysisStateRef = useRef(aiAnalysisState);
-  aiAnalysisStateRef.current = aiAnalysisState;
-
-  const handleAnalysisProgress = useCallback(
-    (state: {
-      isAnalyzing: boolean;
-      currentIndex: number | null;
-      results: Record<number, { valid: boolean; reason: string }>;
-    }) => {
-      setAiAnalysisState(state);
-    },
-    [],
-  );
-
   const columnDefs = useMemo(() => {
     if (!tenderData) return [];
     return orderedColumns.map((col): ColumnDef<Record<string, unknown>> => {
@@ -265,37 +314,54 @@ export default function Dashboard() {
             const val = String(row[col] ?? "");
             const isYes = val === "YES";
             const isNo = val === "NO";
-            const rowIndex = tenderData.rows.findIndex((r) => r.id === row.id);
+            const rowIndex = tenderData.rows.findIndex(
+              (r) => String(r.id) === String(row.id),
+            );
             const rowType = String(row.type ?? "");
             const rowId = String(row.id ?? "");
+            const isUpdating = updatingCells[`${rowIndex}-${col}`];
 
             return (
               <div className="flex gap-1 py-1">
                 <button
                   type="button"
+                  disabled={isUpdating}
                   onClick={() =>
                     handleDecisionClick(col, rowIndex, rowType, rowId, "YES")
                   }
-                  className={`w-7 h-7 rounded text-xs font-bold border transition-colors ${
-                    isYes
-                      ? "bg-green-500 text-white border-green-600"
-                      : "bg-white text-slate-400 border-slate-300 hover:border-slate-400"
+                  className={`w-7 h-7 rounded text-xs font-bold border-2 transition-colors cursor-pointer ${
+                    isUpdating
+                      ? "opacity-50 cursor-not-allowed bg-slate-200 text-slate-400 border-slate-300"
+                      : isYes
+                        ? "bg-green-500 text-white border-green-600"
+                        : "bg-white text-slate-400 border-slate-300 hover:border-slate-400"
                   }`}
                 >
-                  Y
+                  {isUpdating ? (
+                    <span className="inline-block animate-spin">⟳</span>
+                  ) : (
+                    "Y"
+                  )}
                 </button>
                 <button
                   type="button"
+                  disabled={isUpdating}
                   onClick={() =>
                     handleDecisionClick(col, rowIndex, rowType, rowId, "NO")
                   }
-                  className={`w-7 h-7 rounded text-xs font-bold border transition-colors ${
-                    isNo
-                      ? "bg-red-500 text-white border-red-600"
-                      : "bg-white text-slate-400 border-slate-300 hover:border-slate-400"
+                  className={`w-7 h-7 rounded text-xs font-bold border-2 transition-colors cursor-pointer ${
+                    isUpdating
+                      ? "opacity-50 cursor-not-allowed bg-slate-200 text-slate-400 border-slate-300"
+                      : isNo
+                        ? "bg-red-500 text-white border-red-600"
+                        : "bg-white text-slate-400 border-slate-300 hover:border-slate-400"
                   }`}
                 >
-                  N
+                  {isUpdating ? (
+                    <span className="inline-block animate-spin">⟳</span>
+                  ) : (
+                    "N"
+                  )}
                 </button>
               </div>
             );
@@ -337,71 +403,59 @@ export default function Dashboard() {
             ],
           },
           renderCell: (_value: unknown, row: Record<string, unknown>) => {
-            const state = aiAnalysisStateRef.current;
-            const rowIndex = (row as any)._keyIndex as number | undefined;
-
-            if (state.isAnalyzing && rowIndex !== undefined) {
-              if (state.currentIndex === rowIndex) {
-                return (
-                  <span className="flex items-center gap-1.5 text-primary/80">
-                    <Loader2 className="size-3 animate-spin" />
-                    <span className="text-[11px]">Processing...</span>
-                  </span>
-                );
-              }
-              const result = state.results[rowIndex];
-              if (result) {
-                return (
+            const valid = String(row.aiRelevanceValid ?? "");
+            const reason = String(row.aiRelevanceReason ?? "");
+            if (!valid) return <span className="text-slate-300">-</span>;
+            const isYes = valid === "true";
+            const hasFeedback = !!row.aiFeedbackCorrected;
+            const feedbackKey = `${row.id}-${row.type === "Gem" ? "Gem" : "NonGem"}`;
+            const isSaving = feedbackSaving[feedbackKey];
+            return (
+              <div className="relative group/cell">
+                <div className="">
                   <div
                     className="flex flex-col gap-0.5"
                     style={{
-                      maxHeight: 60,
+                      maxHeight: 70,
                       overflowY: "auto",
                       whiteSpace: "normal",
                     }}
                   >
                     <Badge
                       className={`inline-flex w-fit text-[10px] font-medium ${
-                        result.valid
+                        isYes
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
                           : "bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-100"
                       }`}
                     >
-                      {result.valid ? "YES" : "NO"}
+                      {isYes ? "YES" : "NO"}
                     </Badge>
                     <span className="text-[11px] text-slate-500 leading-snug">
-                      {result.reason}
+                      {reason}
                     </span>
+                    {hasFeedback && (
+                      <Badge className="inline-flex w-fit text-[10px] font-medium bg-red-50 text-red-600 border-red-200">
+                        Feedback Given
+                      </Badge>
+                    )}
                   </div>
-                );
-              }
-            }
-
-            const valid = String(row.aiRelevanceValid ?? "");
-            const reason = String(row.aiRelevanceReason ?? "");
-            if (!valid) return <span className="text-slate-300">-</span>;
-            const isYes = valid === "true";
-            return (
-              <div
-                className="flex flex-col gap-0.5"
-                style={{
-                  maxHeight: 60,
-                  overflowY: "auto",
-                  whiteSpace: "normal",
-                }}
-              >
-                <Badge
-                  className={`inline-flex w-fit text-[10px] font-medium ${
-                    isYes
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50"
-                      : "bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-100"
-                  }`}
-                >
-                  {isYes ? "YES" : "NO"}
-                </Badge>
-                <span className="text-[11px] text-slate-500 leading-snug">
-                  {reason}
-                </span>
+                </div>
+                {!hasFeedback && (
+                  <button
+                    className="opacity-0 group-hover/cell:opacity-100 transition-all absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center bg-blue-600 hover:bg-blue-700 p-1 shadow-sm cursor-pointer"
+                    title="Provide Feedback"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFeedbackRow(row);
+                    }}
+                  >
+                    {isSaving ? (
+                      <Loader2 className="w-4 h-4 text-white animate-spin" />
+                    ) : (
+                      <MessageSquare className="w-4 h-4 text-white" />
+                    )}
+                  </button>
+                )}
               </div>
             );
           },
@@ -433,10 +487,14 @@ export default function Dashboard() {
             })),
           },
           sortValue: (value: unknown) => {
-            const ids = String(value ?? "").split(",").filter(Boolean);
+            const ids = String(value ?? "")
+              .split(",")
+              .filter(Boolean);
             return ids
               .map((id) => {
-                const a = tenderData.associations.find((assoc) => assoc.id === parseInt(id));
+                const a = tenderData.associations.find(
+                  (assoc) => assoc.id === parseInt(id),
+                );
                 return a?.name ?? "";
               })
               .filter(Boolean)
@@ -472,10 +530,13 @@ export default function Dashboard() {
 
       if (col === "parseStatus") {
         const statusColors: Record<string, string> = {
-          COMPLETED: "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50",
+          COMPLETED:
+            "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50",
           FAILED: "bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-100",
-          RATE_LIMITED: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50",
-          PROCESSING: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-50",
+          RATE_LIMITED:
+            "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-50",
+          PROCESSING:
+            "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-50",
         };
         return {
           header: "Parse Status",
@@ -494,10 +555,14 @@ export default function Dashboard() {
             const status = String(row.parseStatus ?? "");
             const error = String(row.parseError ?? "");
             if (!status) return <span className="text-slate-300">-</span>;
-            const colorClass = statusColors[status] ?? "bg-slate-50 text-slate-600 border-slate-200";
+            const colorClass =
+              statusColors[status] ??
+              "bg-slate-50 text-slate-600 border-slate-200";
             return (
               <div className="flex flex-col gap-0.5" title={error}>
-                <Badge className={`inline-flex w-fit text-[10px] font-medium ${colorClass}`}>
+                <Badge
+                  className={`inline-flex w-fit text-[10px] font-medium ${colorClass}`}
+                >
                   {status}
                 </Badge>
               </div>
@@ -600,6 +665,36 @@ export default function Dashboard() {
         };
       }
 
+      if (col === "website") {
+        return {
+          header: "Website",
+          accessor: col as keyof Record<string, unknown>,
+          defaultWidth: 200,
+          renderCell: (_value: unknown, row: Record<string, unknown>) => {
+            const raw = String(row[col] ?? "");
+            if (!raw) return <span className="text-slate-300">-</span>;
+            const urls = raw.split(",").map((s) => s.trim()).filter(Boolean);
+            if (urls.length === 0) return <span className="text-slate-300">-</span>;
+            return (
+              <div className="flex flex-col gap-1">
+                {urls.map((url, i) => (
+                  <a
+                    key={i}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 underline hover:text-blue-800 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {url}
+                  </a>
+                ))}
+              </div>
+            );
+          },
+        };
+      }
+
       let filterType: "text" | "select" | "dateRange" | "boolean" | undefined;
 
       if (
@@ -650,6 +745,7 @@ export default function Dashboard() {
     orderedColumns,
     selectFilterOptions,
     tenderData,
+    updatingCells,
     handleDecisionClick,
     handleAssignmentChange,
   ]);
@@ -794,9 +890,19 @@ export default function Dashboard() {
                   </div>
                   <ConfirmAnalysisDialog
                     filteredRows={filteredRows}
-                    onComplete={refreshTenders}
-                    onProgress={handleAnalysisProgress}
                   />
+                  {feedbackRow && (
+                    <AiFeedbackDialog
+                      row={feedbackRow}
+                      isSaving={
+                        feedbackSaving[
+                          `${feedbackRow.id}-${feedbackRow.type === "Gem" ? "Gem" : "NonGem"}`
+                        ] ?? false
+                      }
+                      onSave={handleSaveFeedback}
+                      onClose={() => setFeedbackRow(null)}
+                    />
+                  )}
                 </>
               }
               columns={columnDefs}

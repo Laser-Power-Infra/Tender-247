@@ -342,3 +342,19 @@ model Evaluation {
   @@index([gemTenderId])
   @@map("evaluations")
 }
+
+// ---------- AI FEEDBACK ----------
+model AiFeedback {
+  id             String   @id @default(uuid())
+  tenderId       Int
+  tenderType     String
+  briefText      String
+  originalAi     String
+  correctedAi    String
+  feedbackReason String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenderId, tenderType])
+  @@map("ai_feedback")
+}

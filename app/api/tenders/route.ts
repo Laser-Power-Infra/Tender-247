@@ -15,7 +15,7 @@ interface AssociationInfo {
 }
 
 const GEM_DISPLAY_FIELDS = [
-  "referenceNo", "tenderBrief", "value", "deadline", "quantity", "app", "aps", "apm", "assignedTo", "location",
+  "referenceNo", "tenderBrief", "value", "deadline", "quantity", "app", "aps", "apm", "assignedTo", "location", "website",
   "organization", "documentFees", "emd", "msmeExemption",
   "startupExemption", "bidOpeningDateTime",
   "bidOfferValidity", "ministryStateName", "departmentName",
@@ -38,7 +38,7 @@ const GEM_DISPLAY_FIELDS = [
 
 const NON_GEM_DISPLAY_FIELDS = [
   "referenceNo", "tenderBrief", "estimatedBidValue", "deadline", "quantity", "app", "aps", "apm", "assignedTo",
-  "location", "organization", "documentFees", "emd",
+  "location", "website", "organization", "documentFees", "emd",
   "msmeExemption", "startupExemption", "checklist",
   "t247Id", "scrapedDate", "source", "assignedTo",
   "markedStatus", "sheetStatus", "ready", "searchKey",
@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
       prisma.association.findMany({ select: { id: true, name: true, email: true } }),
     ]);
 
-    console.log("associations count:", allAssociations.length, allAssociations);
+    // console.log("associations count:", allAssociations.length, allAssociations);
 
     const rows: FlatRow[] = [];
 

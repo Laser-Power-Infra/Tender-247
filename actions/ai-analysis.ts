@@ -1,9 +1,10 @@
 "use server";
 
 import { openai } from "@ai-sdk/openai";
-import { generateText, generateObject, APICallError, Output } from "ai";
+import { generateText, APICallError, Output } from "ai";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { getAiFeedbackContext } from "@/lib/ai-feedback";
 
 const model = openai("gpt-4o-mini");
 
@@ -28,13 +29,7 @@ type TenderAnalysisResult =
   | { success: true; data: { valid: boolean; reason: string } }
   | { success: false; error: "rate_limit" | "unknown" };
 
-export async function analyzeTenderValidity(
-  tenderBrief: string,
-): Promise<TenderAnalysisResult> {
-  try {
-    const { output } = await generateText({
-      model,
-      system: `You are a Tender Evaluation Expert.
+const BASE_SYSTEM_PROMPT = `You are a Tender Evaluation Expert.
 
 Determine whether the following tender brief is specifically for the SUPPLY of any of the following products.
 
@@ -85,7 +80,18 @@ Response Format
 Respond in EXACTLY the following format:
 ANSWER: YES or NO
 REASON: (One concise sentence explaining whether the tender is specifically for the supply of the eligible cables/conductors.)
-Important: Return YES only when the tender clearly involves the supply/procurement of one or more eligible products listed above. In every other case, return NO.`,
+Important: Return YES only when the tender clearly involves the supply/procurement of one or more eligible products listed above. In every other case, return NO.`;
+
+export async function analyzeTenderValidity(
+  tenderBrief: string,
+): Promise<TenderAnalysisResult> {
+  try {
+    const feedbackContext = await getAiFeedbackContext();
+    const system = BASE_SYSTEM_PROMPT + feedbackContext;
+
+    const { output } = await generateText({
+      model,
+      system,
       output: Output.object({
         schema: z.object({
           valid: z.boolean(),

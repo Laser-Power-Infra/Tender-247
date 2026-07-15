@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { analyzeTenderValidity, saveAiRelevance } from "@/actions/ai-analysis";
+import { useAppDispatch } from "@/lib/hooks";
+import {
+  analyzeTender,
+  downloadTenderPdf,
+  parseTenderPdf,
+} from "@/lib/slices/tendersSlice";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,28 +21,22 @@ import { Zap, Square } from "lucide-react";
 
 interface ConfirmAnalysisDialogProps {
   filteredRows: Record<string, unknown>[];
-  onComplete: () => void;
-  onProgress?: (state: { isAnalyzing: boolean; currentIndex: number | null; results: Record<number, { valid: boolean; reason: string }> }) => void;
 }
 
 export default function ConfirmAnalysisDialog({
   filteredRows,
-  onComplete,
-  onProgress,
 }: ConfirmAnalysisDialogProps) {
+  const dispatch = useAppDispatch();
   const [open, setOpen] = useState(false);
   const [reRunAll, setReRunAll] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState({ done: 0, total: 0 });
   const abortRef = useRef(false);
-  const localResultsRef = useRef<Record<number, { valid: boolean; reason: string }>>({});
 
   const runAnalysis = useCallback(async (checked: boolean) => {
     abortRef.current = false;
     setIsAnalyzing(true);
     setAnalysisProgress({ done: 0, total: 0 });
-    localResultsRef.current = {};
-    onProgress?.({ isAnalyzing: true, currentIndex: null, results: {} });
 
     const targets = filteredRows.filter(r => {
       const brief = String(r.tenderBrief ?? "");
@@ -54,35 +53,38 @@ export default function ConfirmAnalysisDialog({
 
       const row = targets[i];
       const brief = String(row.tenderBrief ?? "");
-      const originalIdx = (row as any)._keyIndex as number;
 
       try {
-        const result = await analyzeTenderValidity(brief);
-        if (!result.success) {
-          if (result.error === "rate_limit") {
-            abortRef.current = true;
-            break;
-          }
-          continue;
-        }
-        try {
-          await saveAiRelevance({
-            id: Number(row.id),
-            type: row.type as "Gem" | "Non-Gem",
-            valid: result.data.valid,
-            reason: result.data.reason,
-          });
-        } catch {
-          console.error("Failed to save AI relevance");
-        }
+        const result = await dispatch(analyzeTender({
+          id: Number(row.id),
+          type: row.type as "Gem" | "Non-Gem",
+          brief,
+        })).unwrap();
 
-        localResultsRef.current[originalIdx] = result.data;
-        onProgress?.({
-          isAnalyzing: true,
-          currentIndex: originalIdx,
-          results: { ...localResultsRef.current },
-        });
-      } catch {
+        if (result.valid === "true" && row.type === "Gem") {
+          const gemId = row.referenceNo as string | undefined;
+          if (gemId) {
+            try {
+              const dlResult = await dispatch(downloadTenderPdf({
+                id: Number(row.id),
+                gemId,
+              })).unwrap();
+
+              if (dlResult.tenderFileUrl) {
+                await dispatch(parseTenderPdf({
+                  id: Number(row.id),
+                })).unwrap();
+              }
+            } catch {
+              console.error("Download or parse failed");
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message === "rate_limit") {
+          abortRef.current = true;
+          break;
+        }
         console.error("Analysis failed");
       }
 
@@ -91,9 +93,7 @@ export default function ConfirmAnalysisDialog({
 
     setIsAnalyzing(false);
     setAnalysisProgress({ done: 0, total: 0 });
-    onProgress?.({ isAnalyzing: false, currentIndex: null, results: {} });
-    onComplete();
-  }, [filteredRows, onComplete, onProgress]);
+  }, [filteredRows, dispatch]);
 
   const handleStop = useCallback(() => {
     abortRef.current = true;
