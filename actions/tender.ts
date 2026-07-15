@@ -41,6 +41,117 @@ export async function updateTenderAssignmentsAction(params: {
   }
 }
 
+export async function updateTenderUtilityMapping(params: {
+  id: number;
+  type: "Gem" | "Non-Gem";
+  website: string;
+}) {
+  const website = params.website.toLowerCase().trim();
+  try {
+    let organization: string | null = null;
+
+    if (params.type === "Gem") {
+      const tender = await prisma.gemTender.update({
+        where: { id: params.id },
+        data: { website },
+        select: { id: true, organization: true },
+      });
+      organization = tender.organization;
+    } else {
+      const tender = await prisma.nonGemTender.update({
+        where: { id: params.id },
+        data: { website },
+        select: { id: true, organization: true },
+      });
+      organization = tender.organization;
+    }
+
+    if (!organization) throw new Error("Tender has no organization");
+
+    let mapping = await prisma.utilityMapping.findFirst({
+      where: { organization, website },
+    });
+
+    if (!mapping) {
+      mapping = await prisma.utilityMapping.create({
+        data: { organization, website },
+      });
+    }
+
+    if (params.type === "Gem") {
+      await prisma.gemTender.update({
+        where: { id: params.id },
+        data: { utilityMappingId: mapping.id },
+      });
+    } else {
+      await prisma.nonGemTender.update({
+        where: { id: params.id },
+        data: { utilityMappingId: mapping.id },
+      });
+    }
+
+    return { utilityMappingId: mapping.id, organization };
+  } catch (error: any) {
+    console.error(error);
+    throw new Error(error.message ?? "Failed to update utility mapping");
+  }
+}
+
+export async function bulkAssignUtilityMappingAction(params: {
+  organization: string;
+  website: string;
+  utilityMappingId: number;
+  excludeTenderId: number;
+  excludeTenderType: "Gem" | "Non-Gem";
+}) {
+  const website = params.website.toLowerCase().trim();
+  try {
+    const [gemResult, nonGemResult] = await Promise.all([
+      prisma.gemTender.updateMany({
+        where: {
+          organization: params.organization,
+          id: { not: params.excludeTenderType === "Gem" ? params.excludeTenderId : undefined },
+          OR: [
+            { website: { not: website } },
+            { website: null },
+          ],
+        },
+        data: { website, utilityMappingId: params.utilityMappingId },
+      }),
+      prisma.nonGemTender.updateMany({
+        where: {
+          organization: params.organization,
+          id: { not: params.excludeTenderType === "Non-Gem" ? params.excludeTenderId : undefined },
+          OR: [
+            { website: { not: website } },
+            { website: null },
+          ],
+        },
+        data: { website, utilityMappingId: params.utilityMappingId },
+      }),
+    ]);
+
+    const [gemIds, nonGemIds] = await Promise.all([
+      prisma.gemTender.findMany({
+        where: { organization: params.organization, website },
+        select: { id: true },
+      }),
+      prisma.nonGemTender.findMany({
+        where: { organization: params.organization, website },
+        select: { id: true },
+      }),
+    ]);
+
+    return {
+      updatedGem: gemIds.map((g) => g.id),
+      updatedNonGem: nonGemIds.map((g) => g.id),
+    };
+  } catch (error: any) {
+    console.error(error);
+    throw new Error(error.message ?? "Failed to bulk assign utility mapping");
+  }
+}
+
 export async function updateTenderDecision(params: {
   id: number;
   type: "Gem" | "Non-Gem";
@@ -48,6 +159,7 @@ export async function updateTenderDecision(params: {
   value: "YES" | "NO" | "NOT_DECIDED";
 }) {
   const data = { [params.field]: params.value };
+  let webhookTriggered = false;
   try {
     console.log(data);
     if (params.type === "Gem") {
@@ -59,7 +171,8 @@ export async function updateTenderDecision(params: {
         });
         if (tender && tender.tenderAssociations.length > 0) {
           const { referenceNo, itemCategory, organization, deadline, tenderFileUrl } = tender as any;
-          sendTenderWebhook({ referenceNo, itemCategory, organization, deadline, tenderFileUrl }, "Gem", tender.tenderAssociations);
+          const webhookResponse = await sendTenderWebhook({ referenceNo, itemCategory, organization, deadline, tenderFileUrl }, "Gem", tender.tenderAssociations);
+          return { webhookTriggered: true, webhookResponse, referenceNo };
         }
       }
     } else {
@@ -71,11 +184,13 @@ export async function updateTenderDecision(params: {
         });
         if (tender && tender.tenderAssociations.length > 0) {
           const { referenceNo, itemCategory, organization, deadline, tenderFileUrl } = tender as any;
-          sendTenderWebhook({ referenceNo, itemCategory, organization, deadline, tenderFileUrl }, "Non-Gem", tender.tenderAssociations);
+          const webhookResponse = await sendTenderWebhook({ referenceNo, itemCategory, organization, deadline, tenderFileUrl }, "Non-Gem", tender.tenderAssociations);
+          return { webhookTriggered: true, webhookResponse, referenceNo };
         }
       }
     }
   } catch (error: any) {
     console.error(error);
   }
+  return { webhookTriggered: false };
 }

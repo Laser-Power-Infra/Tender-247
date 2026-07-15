@@ -14,6 +14,8 @@ import {
   appendTenders,
   updateTenderCell,
   updateTenderAssignments,
+  updateWebsiteMapping,
+  bulkAssignUtilityMapping,
   saveFeedbackAndReanalyze,
 } from "@/lib/slices/tendersSlice";
 import { setExclusionFilter } from "@/lib/slices/filtersSlice";
@@ -21,12 +23,13 @@ import { toast } from "sonner";
 import ActionArea from "@/components/tender-viewer/action-area";
 import ConfirmAnalysisDialog from "@/components/tender-viewer/confirm-analysis-dialog";
 import AiFeedbackDialog from "@/components/tender-viewer/ai-feedback-dialog";
+import WebsiteEditDialog from "@/components/tender-viewer/website-edit-dialog";
 import TenderTable from "@/components/tender-viewer/tender-table";
 import ReferenceTenderTable from "@/reference/TenderTable";
 import FileUpload from "@/components/upload/file-upload";
 import AnalyticsCards from "@/components/tender-viewer/analytics-cards";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, MessageSquare } from "lucide-react";
+import { Loader2, MessageSquare, Pencil } from "lucide-react";
 import {
   OptimizedTenderTable,
   ColumnDef,
@@ -54,6 +57,10 @@ export default function Dashboard() {
   const uploadResults = useAppSelector((s) => s.upload.results);
 
   const [feedbackRow, setFeedbackRow] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [websiteEditRow, setWebsiteEditRow] = useState<Record<
     string,
     unknown
   > | null>(null);
@@ -146,10 +153,17 @@ export default function Dashboard() {
         }),
       )
         .unwrap()
-        .then(() => {
+        .then((result) => {
           toast.success(`${col.toUpperCase()} set to ${value}`, {
             id: toastId,
           });
+          if (result?.webhookTriggered) {
+            const ref = result.referenceNo ?? "";
+            if (result.webhookResponse?.message) {
+              const toastFn = result.webhookResponse.success ? toast.success : toast.error;
+              toastFn(`${ref}: ${result.webhookResponse.message}`);
+            }
+          }
         })
         .catch((err: Error) => {
           toast.error(`Failed to update: ${err.message}`, { id: toastId });
@@ -182,6 +196,58 @@ export default function Dashboard() {
         })
         .finally(() => {
           setFeedbackRow(null);
+        });
+    },
+    [dispatch],
+  );
+
+  const handleWebsiteSave = useCallback(
+    (params: {
+      tenderId: number;
+      tenderType: string;
+      website: string;
+      oldValue: string;
+    }) => {
+      const toastId = toast.loading("Saving website...");
+      dispatch(
+        updateWebsiteMapping({
+          type: params.tenderType as "Gem" | "Non-Gem",
+          id: params.tenderId,
+          website: params.website,
+          oldValue: params.oldValue,
+        }),
+      )
+        .unwrap()
+        .then((result) => {
+          toast.success("Website saved", { id: toastId });
+          setWebsiteEditRow(null);
+          const type = params.tenderType as "Gem" | "Non-Gem";
+          dispatch(
+            bulkAssignUtilityMapping({
+              organization: result.organization,
+              website: params.website,
+              utilityMappingId: result.utilityMappingId,
+              excludeTenderId: params.tenderId,
+              excludeTenderType: type,
+            }),
+          )
+            .unwrap()
+            .then((bulkResult) => {
+              const total =
+                bulkResult.updatedGem.length + bulkResult.updatedNonGem.length;
+              if (total > 0) {
+                toast.success(
+                  `Updated ${total} tender${total > 1 ? "s" : ""} with same organization`,
+                );
+              }
+            })
+            .catch((err: Error) => {
+              toast.error(`Bulk update failed: ${err.message}`);
+            });
+        })
+        .catch((err: Error) => {
+          toast.error(`Failed: ${err.message}`, { id: toastId });
+          setWebsiteEditRow(null);
         });
     },
     [dispatch],
@@ -672,23 +738,58 @@ export default function Dashboard() {
           defaultWidth: 200,
           renderCell: (_value: unknown, row: Record<string, unknown>) => {
             const raw = String(row[col] ?? "");
-            if (!raw) return <span className="text-slate-300">-</span>;
-            const urls = raw.split(",").map((s) => s.trim()).filter(Boolean);
-            if (urls.length === 0) return <span className="text-slate-300">-</span>;
+            const websiteKey = `${row.id}-${row.type === "Gem" ? "Gem" : "NonGem"}-website`;
+            const isSaving = updatingCells[websiteKey];
+            const urls = raw
+              ? raw
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : [];
             return (
-              <div className="flex flex-col gap-1">
-                {urls.map((url, i) => (
-                  <a
-                    key={i}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 underline hover:text-blue-800 text-xs"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {url}
-                  </a>
-                ))}
+              <div className="relative group/cell h-full">
+                <div
+                  className="h-full"
+                  style={{
+                    height: 70,
+                    maxHeight: 70,
+                    overflowY: "auto",
+                    whiteSpace: "normal",
+                  }}
+                >
+                  {urls.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      {urls.map((url, i) => (
+                        <a
+                          key={i}
+                          href={url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 underline hover:text-blue-800 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {url}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-300">-</span>
+                  )}
+                </div>
+                <button
+                  className="opacity-0 group-hover/cell:opacity-100 transition-all absolute top-0 right-0 w-8 h-8 rounded-full flex items-center justify-center bg-blue-600 hover:bg-blue-700 p-1 shadow-sm cursor-pointer"
+                  title="Edit Website"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setWebsiteEditRow(row);
+                  }}
+                >
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 text-white animate-spin" />
+                  ) : (
+                    <Pencil className="w-4 h-4 text-white" />
+                  )}
+                </button>
               </div>
             );
           },
@@ -888,9 +989,7 @@ export default function Dashboard() {
                       </>
                     )}
                   </div>
-                  <ConfirmAnalysisDialog
-                    filteredRows={filteredRows}
-                  />
+                  <ConfirmAnalysisDialog filteredRows={filteredRows} />
                   {feedbackRow && (
                     <AiFeedbackDialog
                       row={feedbackRow}
@@ -901,6 +1000,18 @@ export default function Dashboard() {
                       }
                       onSave={handleSaveFeedback}
                       onClose={() => setFeedbackRow(null)}
+                    />
+                  )}
+                  {websiteEditRow && (
+                    <WebsiteEditDialog
+                      row={websiteEditRow}
+                      isSaving={
+                        updatingCells[
+                          `${websiteEditRow.id}-${websiteEditRow.type === "Gem" ? "Gem" : "NonGem"}-website`
+                        ] ?? false
+                      }
+                      onSave={handleWebsiteSave}
+                      onClose={() => setWebsiteEditRow(null)}
                     />
                   )}
                 </>

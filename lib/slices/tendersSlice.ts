@@ -1,7 +1,7 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import type { PayloadAction } from "@reduxjs/toolkit";
 import pLimit from "p-limit";
-import { updateTenderDecision, updateTenderAssignmentsAction } from "@/actions/tender";
+import { updateTenderDecision, updateTenderAssignmentsAction, updateTenderUtilityMapping, bulkAssignUtilityMappingAction } from "@/actions/tender";
 import { analyzeTenderValidity, saveAiRelevance } from "@/actions/ai-analysis";
 
 export interface TenderData {
@@ -52,6 +52,37 @@ export const updateTenderAssignments = createAsyncThunk(
   },
 );
 
+export const updateWebsiteMapping = createAsyncThunk(
+  "tenders/updateWebsiteMapping",
+  async (params: {
+    type: "Gem" | "Non-Gem";
+    id: number;
+    website: string;
+    oldValue: string;
+  }) => {
+    const result = await updateTenderUtilityMapping({
+      type: params.type,
+      id: params.id,
+      website: params.website,
+    });
+    return { ...result, type: params.type, id: params.id };
+  },
+);
+
+export const bulkAssignUtilityMapping = createAsyncThunk(
+  "tenders/bulkAssignUtilityMapping",
+  async (params: {
+    organization: string;
+    website: string;
+    utilityMappingId: number;
+    excludeTenderId: number;
+    excludeTenderType: "Gem" | "Non-Gem";
+  }) => {
+    const result = await bulkAssignUtilityMappingAction(params);
+    return result;
+  },
+);
+
 export const updateTenderCell = createAsyncThunk(
   "tenders/updateCell",
   async (params: {
@@ -62,12 +93,13 @@ export const updateTenderCell = createAsyncThunk(
     id: number;
     oldValue: string;
   }) => {
-    await updateTenderDecision({
+    const result = await updateTenderDecision({
       type: params.type,
       id: params.id,
       field: params.field as "app" | "aps" | "apm",
       value: params.value as "YES" | "NO" | "NOT_DECIDED",
     });
+    return result;
   },
 );
 
@@ -341,6 +373,45 @@ export const tendersSlice = createSlice({
         state.data.rows[rowIndex].assignedTo = oldValue;
       }
     });
+    // updateWebsiteMapping
+    builder.addCase(updateWebsiteMapping.pending, (state, action) => {
+      const { id, type, website } = action.meta.arg;
+      const key = `${id}-${type}-website`;
+      state.updatingCells[key] = true;
+      if (state.data) {
+        const row = state.data.rows.find((r) => Number(r.id) === id);
+        if (row) row.website = website;
+      }
+    });
+    builder.addCase(updateWebsiteMapping.fulfilled, (state, action) => {
+      const key = `${action.meta.arg.id}-${action.meta.arg.type}-website`;
+      state.updatingCells[key] = false;
+    });
+    builder.addCase(updateWebsiteMapping.rejected, (state, action) => {
+      const { id, type, oldValue } = action.meta.arg;
+      const key = `${id}-${type}-website`;
+      state.updatingCells[key] = false;
+      if (state.data) {
+        const row = state.data.rows.find((r) => Number(r.id) === id);
+        if (row) row.website = oldValue;
+      }
+    });
+
+    // bulkAssignUtilityMapping
+    builder.addCase(bulkAssignUtilityMapping.fulfilled, (state, action) => {
+      const { updatedGem, updatedNonGem } = action.payload;
+      if (state.data) {
+        for (const id of updatedGem) {
+          const row = state.data.rows.find((r) => Number(r.id) === id);
+          if (row) row.website = action.meta.arg.website;
+        }
+        for (const id of updatedNonGem) {
+          const row = state.data.rows.find((r) => Number(r.id) === id);
+          if (row) row.website = action.meta.arg.website;
+        }
+      }
+    });
+
     builder.addCase(saveAiFeedback.pending, (state, action) => {
       const key = `${action.meta.arg.tenderId}-${action.meta.arg.tenderType}`;
       state.feedbackSaving[key] = true;

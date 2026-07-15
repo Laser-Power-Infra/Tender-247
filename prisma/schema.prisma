@@ -144,6 +144,9 @@ model GemTender {
   website        String?
   locationCount  Int?
 
+  utilityMappingId Int?
+  utilityMapping   UtilityMapping? @relation(fields: [utilityMappingId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -153,6 +156,7 @@ model GemTender {
   evaluations Evaluation[]
 
   @@index([fileId])
+  @@index([utilityMappingId])
   @@map("gem_tenders")
 }
 
@@ -209,6 +213,9 @@ model NonGemTender {
   website        String?
   locationCount  Int?
 
+  utilityMappingId Int?
+  utilityMapping   UtilityMapping? @relation(fields: [utilityMappingId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -216,6 +223,7 @@ model NonGemTender {
   tenderAssociations TenderAssociation[]
 
   @@index([fileId])
+  @@index([utilityMappingId])
   @@map("non_gem_tenders")
 }
 
@@ -358,3 +366,19 @@ model AiFeedback {
   @@unique([tenderId, tenderType])
   @@map("ai_feedback")
 }
+
+// ---------- UTILITY MAPPING ----------
+model UtilityMapping {
+  id           Int      @id @default(autoincrement())
+  organization String
+  website      String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  gemTenders    GemTender[]
+  nonGemTenders NonGemTender[]
+
+  @@map("utility_mappings")
+}
+
+

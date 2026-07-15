@@ -1,4 +1,5 @@
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL;
+const N8N_WEBHOOK_URL_PROD = process.env.N8N_WEBHOOK_URL;
+const N8N_WEBHOOK_URL_TEST = process.env.N8N_WEBHOOK_URL_TEST;
 
 interface WebhookPayload {
   tenderReferenceNumber: string;
@@ -35,7 +36,11 @@ export async function sendTenderWebhook(
   type: "Gem" | "Non-Gem",
   associations: { association: { name: string; email: string } }[],
 ) {
-  if (!N8N_WEBHOOK_URL) return;
+  const url =
+    process.env.ENVIRONMENT === "PROD"
+      ? N8N_WEBHOOK_URL_PROD
+      : N8N_WEBHOOK_URL_TEST;
+  if (!url) return;
 
   const payload: WebhookPayload = {
     tenderReferenceNumber: tender.referenceNo,
@@ -55,7 +60,7 @@ export async function sendTenderWebhook(
   };
 
   try {
-    const response = await fetch(N8N_WEBHOOK_URL, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -64,8 +69,11 @@ export async function sendTenderWebhook(
       console.error(
         `Webhook returned ${response.status}: ${await response.text()}`,
       );
+      return null;
     }
+    return await response.json() as { success: boolean; message: string } | null;
   } catch (error) {
     console.error("Failed to send webhook:", error);
+    return null;
   }
 }
